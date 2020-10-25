@@ -10,3 +10,5 @@ From DrRacket:
 Or from the command line:
 1. Install: `raco pkg install racket-paint`
 2. Launch: `racket -l racket-paint`
+
+![yeah, painting's not my forte as you can see](img/demo.png)
