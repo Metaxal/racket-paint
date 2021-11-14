@@ -28,17 +28,8 @@
     (define/override (on-event ev)
       (when (send ev get-left-down)
         (when (send ev button-changed? 'left)
-          ; start a new line
-          (set! commands (cons '(points) commands)))
-        (define pos (cons (send ev get-x) (send ev get-y)))
-        (define-values (prev-points rest-commands)
-          (match commands
-            [(list-rest (list-rest 'points prev-pts) rst)
-             (values prev-pts rst)]
-            [else (values '() commands)]))
-        (set! commands
-              (cons (list* 'points pos prev-points)
-                    rest-commands))
+          (new-line))
+        (add-point (send ev get-x) (send ev get-y))
         (send this refresh)))
 
     (define/override (on-subwindow-char receiver ev)
@@ -85,6 +76,24 @@
               (match commands
                 [`((color ,c-old) . ,rst) rst] ; replace
                 [else commands]))))
+
+    (define/public (new-line)
+      ; start a new line
+      (match commands
+        [(list-rest '(points) _rst) ; already a new line
+         (void)]
+        [else (set! commands (cons '(points) commands))]))
+    
+    (define/public (add-point x y)
+      (define pos (cons x y))
+      (define-values (prev-points rest-commands)
+        (match commands
+          [(list-rest (list-rest 'points prev-pts) rst) ;  add to previous list of points
+           (values prev-pts rst)]
+          [else (values '() commands)]))
+      (set! commands
+            (cons (list* 'points pos prev-points)
+                  rest-commands)))
 
     (define/public (get-line-width) line-width)
 
