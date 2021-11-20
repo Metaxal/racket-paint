@@ -3,7 +3,7 @@ racket-paint
 
 A simple paint program written in Racket.
 
-![yeah, painting's not my forte as you can see](img/demo.png)
+<img src="https://user-images.githubusercontent.com/1658140/142733261-92bfd15e-4475-49ba-9fb4-83a64d456f8b.png">
 
 
 # Installation
@@ -20,3 +20,4 @@ Or from the command line:
 
 Everything should be pretty obvious. Right-click on color buttons to change the color (or 
 to pick one from the screen).
+
