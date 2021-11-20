@@ -2,6 +2,7 @@
 (define collection "racket-paint")
 (define deps '("gui-lib"
                "pict-lib"
+               "search-list-box"
                "base"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/racket-paint.scrbl" ())))
