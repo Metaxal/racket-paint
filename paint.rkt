@@ -1,7 +1,8 @@
 #lang racket
 
 (require racket/gui/base
-         pict)
+         pict
+         search-list-box)
 
 (provide (all-defined-out))
 
@@ -10,10 +11,27 @@
 (define line-width-max 100)
 
 ;; TODO:
-;; - When adding a command, draw on top of the current bitmap,
-;;   On undo, redraw from the start.
-;; - Save/load bitmap
 ;; - draw rectangle, filled-rectangle
+;; - change background color
+
+(define my-keymap%
+  (class keymap%
+    
+    (define mapped-shortcuts '())
+    (define/public (get-shortcuts) mapped-shortcuts)
+    
+    (define/public (add! name thunk . shortcuts)
+      (send keymap add-function name (λ (receiver event) (thunk)))
+      (for ([sh (in-list shortcuts)])
+        (set! mapped-shortcuts (cons (list sh name) mapped-shortcuts))
+        (send this map-function sh name)))
+
+    (define/public (call name)
+      (send this call-function name this (new event%)))
+    
+    (super-new)))
+
+(define keymap (new my-keymap%))
 
 (define my-canvas%
   (class canvas%
@@ -34,29 +52,10 @@
         (add-point x y)))
 
     (define/override (on-subwindow-char receiver ev)
-      (define code (send ev get-key-code))
-      (define ctl (send ev get-control-down))
-      (define key (list code))
-      (when ctl (set! key (cons 'ctl key)))
-      #;(writeln key)
-      (define matched?
-        (match key
-          ['(ctl #\e) (clear-commands)]
-          ['(ctl #\z) (undo-command)]
-          [(or '(ctl #\+)
-               '(#\x)) ; xp-pen "brush-size+"
-           (set-line-width (min line-width-max (+ line-width 1)))]
-          [(or '(ctl #\-)
-               '(#\y)) ; xp-pen "brush-size-"
-           (set-line-width (max line-width-min (- line-width 1)))]
-          ['(ctl #\1) (set-color "black")]
-          ['(ctl #\2) (set-color "white")]
-          ['(ctl #\3) (set-color "red")]
-          ['(ctl #\4) (set-color "blue")]
-          ['(ctl #\5) (set-color "green")]
-          [else 'unmatched]))
-      (not (eq? matched? 'unmatched))) ; do we not forward the event?
+      (send keymap handle-key-event receiver ev))
     
+    (define/override (on-subwindow-event receiver ev)
+      (send keymap handle-mouse-event receiver ev))
     
     (define/public (get-commands)
       commands)
@@ -163,7 +162,19 @@
       (for ([cmd (in-list commands)])
         (do-command cmd dc)))
 
+    
+    (begin
+      (send keymap add! "clear" (λ () (clear-commands)) "c:e")
+      (send keymap add! "undo" (λ () (undo-command)) "c:z" "u")
+      (send keymap add! "increase-brush-size"
+            (λ () (set-line-width (min line-width-max (+ line-width 1))))
+            "c:+" "x" "wheelup")
+      (send keymap add! "decrease-brush-size"
+            (λ () (set-line-width (max line-width-min (- line-width 1))))
+            "c:-" "y" "wheeldown"))
+    
     (super-new)
+    (send (send this get-dc) set-smoothing 'aligned)
     (clear-commands)))
 
 (define fr (new frame% [label "Racket Paint"]
@@ -198,11 +209,19 @@
     (super-new
      [label (make-button-color-label color)])))
 
-(for ([color '("black" "white" "red" "green" "blue")])
-  (new color-button%
-       [parent bt-panel]
-       [color (send the-color-database find-color color)]
-       [get-canvas (λ () cv)]))
+(define init-buttons
+  (for/list ([color '("black" "white" "red" "green" "blue")]
+             [i (in-naturals 1)])
+    (define cbt
+      (new color-button%
+           [parent bt-panel]
+           [color (send the-color-database find-color color)]
+           [get-canvas (λ () cv)]))
+    (λ ()
+      (send keymap add!
+            (format "color ~a" i)
+            (λ () (send cv set-color (get-field color cbt)))
+            (format "~a" i)))))
 
 (define bt-undo (new button% [parent bt-panel] [label "Undo"]
                       [callback (λ (bt ev)
@@ -226,6 +245,20 @@
                                     '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
                           (when f (send cv save-file f)))]))
 
+(define bt-shortcuts (new button% [parent bt-panel] [label "&Shortcuts"]
+                          [callback
+                           (λ (bt ev)
+                             (new search-list-box-frame% [parent fr] [label "Shortcuts"]
+                                  [contents
+                                   (sort (send keymap get-shortcuts)
+                                         string<=? #:key second)]
+                                  [key (λ (content)
+                                         (string-append (~a (first content))
+                                                        "\t"
+                                                        (second content)))]
+                                  [callback (λ (idx lbl content)
+                                              (send keymap call (second content)))]))]))
+
 (define width-slider (new slider% [parent fr] [label "Line width"]
                           [min-value line-width-min]
                           [max-value line-width-max]
@@ -243,3 +276,5 @@
                    (send cv draw dc)
                    (send width-slider set-value (send cv get-line-width))
                    (send width-slider refresh))]))
+
+(for-each (λ (thk) (thk)) init-buttons) ; must be done once cv has a value
