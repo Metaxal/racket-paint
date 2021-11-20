@@ -29,8 +29,9 @@
       (when (send ev get-left-down)
         (when (send ev button-changed? 'left)
           (new-line))
-        (add-point (send ev get-x) (send ev get-y))
-        (send this refresh)))
+        (define x (send ev get-x))
+        (define y (send ev get-y))
+        (add-point x y)))
 
     (define/override (on-subwindow-char receiver ev)
       (define code (send ev get-key-code))
@@ -75,7 +76,8 @@
         (cons (list 'color color)
               (match commands
                 [`((color ,c-old) . ,rst) rst] ; replace
-                [else commands]))))
+                [else commands])))
+      (do-last-command))
 
     (define/public (new-line)
       ; start a new line
@@ -83,6 +85,12 @@
         [(list-rest '(points) _rst) ; already a new line
          (void)]
         [else (set! commands (cons '(points) commands))]))
+
+    (define/public (get-last-point)
+      (match commands
+        [(list-rest (list-rest 'points (cons x y) _rst-pts) _rst-cmds)
+         (cons x y)]
+        [else #false]))
     
     (define/public (add-point x y)
       (define pos (cons x y))
@@ -91,9 +99,13 @@
           [(list-rest (list-rest 'points prev-pts) rst) ;  add to previous list of points
            (values prev-pts rst)]
           [else (values '() commands)]))
+      (define x0.y0 (and (not (empty? prev-points)) (first prev-points)))
       (set! commands
             (cons (list* 'points pos prev-points)
-                  rest-commands)))
+                  rest-commands))
+      ; Draw directly to avoid having to redraw everything all the time
+      (when x0.y0
+        (send (send this get-dc) draw-line (car x0.y0) (cdr x0.y0) x y)))
 
     (define/public (get-line-width) line-width)
 
@@ -104,6 +116,7 @@
               (match commands
                 [`((line-width ,w-old) . ,rst) rst] ; replace
                 [else commands])))
+      (do-last-command)
       (on-set-line-width this w))
 
     (define/public (set-tool t)
@@ -122,24 +135,33 @@
         (set! commands (with-input-from-file f read))
         (send this refresh)))
 
+    (define/public (do-command cmd [dc (send this get-dc)])
+      (match cmd
+        [`(line-width ,w)
+         (define p (send dc get-pen))
+         (send dc set-pen (send p get-color) w 'solid)]
+        [`(color ,c)
+         (define p (send dc get-pen))
+         (send dc set-pen (if (list? c) (apply make-color c) c)
+               (send p get-width) 'solid)]
+        [`(points . ,pts)
+         (send dc draw-lines pts)]
+        [else (error "Unknown command: " cmd)]))
+
+    (define/public (do-last-command [dc (send this get-dc)])
+      (match (get-commands)
+        [(list-rest cmd _rst-cmds)
+         (do-command cmd dc)]
+        [else (void)]))
+
     (define/public (draw dc)
-      (define commands (reverse (send cv get-commands)))
+      (define commands (reverse (get-commands)))
       (send dc set-background background-color)
       (send dc clear)
       ; Not efficient to redraw all the lines each time. We should keep the previous
       ; picture and draw on top of it instead.
       (for ([cmd (in-list commands)])
-        (match cmd
-          [`(line-width ,w)
-           (define p (send dc get-pen))
-           (send dc set-pen (send p get-color) w 'solid)]
-          [`(color ,c)
-           (define p (send dc get-pen))
-           (send dc set-pen (if (list? c) (apply make-color c) c)
-                 (send p get-width) 'solid)]
-          [`(points . ,pts)
-           (send dc draw-lines pts)]
-          [else (error "Unknown command: " cmd)])))
+        (do-command cmd dc)))
 
     (super-new)
     (clear-commands)))
