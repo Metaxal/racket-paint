@@ -155,17 +155,32 @@
 (define (make-button-color-label color)
   (pict->bitmap (colorize (filled-rectangle 20 20) color)))
 
-(for ([color '("black" "white" "red" "green" "blue")])
-  (new button% [parent bt-panel] [label (make-button-color-label color)]
-       [callback (λ (bt ev) (send cv set-color color))]))
+(define color-button%
+  (class button%
+    (init-field get-canvas
+                [color (send the-color-database find-color "black")])
+    (define/override (on-subwindow-event bt ev)
+      (case (send ev get-event-type)
+        [(left-up)
+         (send (get-canvas) set-color color)
+         #f] ; #f just to get the button press feel
+        [(right-up)
+         (define c (get-color-from-user #f #f color))
+         (when c
+           (set! color c)
+           (send (get-canvas) set-color c)
+           (send bt set-label (make-button-color-label c))
+           (send bt refresh))
+         #f]
+        [else #f]))
+    (super-new
+     [label (make-button-color-label color)])))
 
-(define bt-color (new button% [parent bt-panel] [label (make-button-color-label "black")]
-                      [callback (λ (bt ev)
-                                  (define c (get-color-from-user))
-                                  (when c
-                                    (send cv set-color c)
-                                    (send bt set-label (make-button-color-label c))
-                                    (send bt refresh)))]))
+(for ([color '("black" "white" "red" "green" "blue")])
+  (new color-button%
+       [parent bt-panel]
+       [color (send the-color-database find-color color)]
+       [get-canvas (λ () cv)]))
 
 (define bt-undo (new button% [parent bt-panel] [label "Undo"]
                       [callback (λ (bt ev)
