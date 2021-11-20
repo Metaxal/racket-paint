@@ -2,6 +2,7 @@ racket-paint
 ============
 
 A simple paint program written in Racket.
+
 ![yeah, painting's not my forte as you can see](img/demo.png)
 
 
