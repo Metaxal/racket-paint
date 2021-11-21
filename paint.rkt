@@ -1,8 +1,18 @@
-#lang racket
+#lang racket/base
 
-(require racket/gui/base
+(require "misc.rkt"
+         "keymap.rkt"
+         "event-listener.rkt"
+         (except-in racket/gui/base keymap%)
          pict
-         search-list-box)
+         search-list-box
+         racket/contract
+         racket/class
+         racket/match
+         racket/list
+         racket/dict
+         racket/file
+         racket/format)
 
 (provide (all-defined-out))
 
@@ -10,31 +20,64 @@
 (define line-width-min 1)
 (define line-width-max 100)
 
+(define rktp-pref-dir (build-path (find-system-path 'pref-dir) "racket-paint"))
+(define keymap-file (build-path rktp-pref-dir "keymap.rktd"))
+
+(define (save-keymap)
+  (make-directory* rktp-pref-dir)
+  (write-to-file
+   (hash->list (send keymap get-mappings))
+   keymap-file
+   #:exists 'replace))
+
+(define (load-keymap)
+  (when (file-exists? keymap-file)
+    (send keymap clear-mappings)
+    (define d (file->value keymap-file))
+    (for ([(ev-dict name) (in-dict d)])
+      (send keymap map-function name ev-dict))))
+
 ;; TODO:
 ;; - draw rectangle, filled-rectangle
 ;; - change background color
 
-(define my-keymap%
-  (class keymap%
-    
-    (define mapped-shortcuts '())
-    (define/public (get-shortcuts) mapped-shortcuts)
-    
-    (define/public (add! name thunk . shortcuts)
-      (send keymap add-function name (λ (receiver event) (thunk)))
-      (for ([sh (in-list shortcuts)])
-        (set! mapped-shortcuts (cons (list sh name) mapped-shortcuts))
-        (send this map-function sh name)))
+(define keymap (new keymap%))
 
-    (define/public (call name)
-      (send this call-function name this (new event%)))
+;; TODO: This should be a mixin with an interface for easy checking.
+;; TODO: Export this to keymap.rkt or some othe file
+(define (keymapped%% wnd-class keymap)
+  (check-argument wnd-class (implementation?/c window<%>))
+  (check-argument keymap (is-a?/c keymap%))
+  (cond
+    [(is-a? wnd-class canvas%)
+     (class wnd-class
+       (define/override (on-subwindow-char receiver ev) ; better than `on-char`?
+         (or (send keymap handle-event receiver ev)
+             (super on-subwindow-char receiver ev)))
     
-    (super-new)))
+       (define/override (on-subwindow-event receiver ev) ; better than `on-event`?
+         (or (send keymap handle-event receiver ev)
+             (super on-subwindow-event receiver ev)))
 
-(define keymap (new my-keymap%))
+       (define/override (on-scroll ev)
+         (or (send keymap handle-event this ev)
+             (super on-scroll ev)))
+      
+       (super-new))]
+    [else
+     (class wnd-class
+       (define/override (on-subwindow-char receiver ev)
+         (or (send keymap handle-event receiver ev)
+             (super on-subwindow-char receiver ev)))
+    
+       (define/override (on-subwindow-event receiver ev)
+         (or (send keymap handle-event receiver ev)
+             (super on-subwindow-event receiver ev)))
+
+       (super-new))]))
 
 (define my-canvas%
-  (class canvas%
+  (class (keymapped%% canvas% keymap)
     (define color "black")
     (define line-width line-width-init)
     (define commands '())
@@ -51,12 +94,6 @@
         (define y (send ev get-y))
         (add-point x y)))
 
-    (define/override (on-subwindow-char receiver ev)
-      (send keymap handle-key-event receiver ev))
-    
-    (define/override (on-subwindow-event receiver ev)
-      (send keymap handle-mouse-event receiver ev))
-    
     (define/public (get-commands)
       commands)
 
@@ -164,36 +201,62 @@
 
     
     (begin
-      (send keymap add! "clear" (λ () (clear-commands)) "c:e")
-      (send keymap add! "undo" (λ () (undo-command)) "c:z" "u")
-      (send keymap add! "increase-brush-size"
-            (λ () (set-line-width (min line-width-max (+ line-width 1))))
-            "c:+" "x" "wheelup")
-      (send keymap add! "decrease-brush-size"
-            (λ () (set-line-width (max line-width-min (- line-width 1))))
-            "c:-" "y" "wheeldown"))
+      (send keymap add-function "increase-brush-size"
+            (λ _ (set-line-width (min line-width-max (+ line-width 1))))
+            (new key-event% [key-code #\+] [control-down #true])
+            (new key-event% [key-code #\x])
+            (new key-event% [key-code 'wheelup]))
+      (send keymap add-function "decrease-brush-size"
+            (λ _ (set-line-width (max line-width-min (- line-width 1))))
+            (new key-event% [key-code #\-] [control-down #true])
+            (new key-event% [key-code #\y])
+            (new key-event% [key-code 'wheeldown])))
     
     (super-new)
     (send (send this get-dc) set-smoothing 'aligned)
     (clear-commands)))
 
-(define fr (new frame% [label "Racket Paint"]
+(define fr (new (keymapped%% frame% keymap)
+                [label "Racket Paint"]
                 [width 500] [height 500]))
 
 (define bt-panel (new horizontal-panel% [parent fr] [stretchable-height #f]))
 
-(define bt-erase (new button% [parent bt-panel] [label "Clear"]
-                      [callback (λ (bt ev) (send cv clear-commands))]))
-
 (define (make-button-color-label color)
   (pict->bitmap (colorize (filled-rectangle 20 20) color)))
 
-(define color-button%
+(define keymapped-button%
   (class button%
+    (init callback)
+    (init-field keymap-name) ; may not be the same as label, and label may not be text
+    (check-argument keymap-name string?)
+
+    (send keymap add-function keymap-name callback)
+    
+    (define/override (on-subwindow-event bt bt-ev)
+      (cond
+        [(and (eq? (send bt-ev get-event-type)
+                   'left-up)
+              (send bt-ev get-control-down))
+         (define ev (show-event-listener-dialog #:parent (send this get-top-level-window)))
+         (when ev
+           (send keymap remove-function-mappings keymap-name) ; remove old shortcut
+           (send keymap map-function keymap-name ev)
+           (save-keymap))]
+        [else (super on-subwindow-event bt bt-ev)]))
+    
+    (super-new [callback callback])))
+
+;; TODO: Make the ctrl-click to change the shortcut a mixin!
+;;  and use that for all buttons and more!
+(define color-button%
+  (class keymapped-button%
     (init-field get-canvas
                 [color (send the-color-database find-color "black")])
     (define/override (on-subwindow-event bt ev)
-      (case (send ev get-event-type)
+      (or
+       (super on-subwindow-event bt ev)
+       (case (send ev get-event-type)
         [(left-up)
          (send (get-canvas) set-color color)
          #f] ; #f just to get the button press feel
@@ -205,31 +268,36 @@
            (send bt set-label (make-button-color-label c))
            (send bt refresh))
          #f]
-        [else #f]))
+         [else #t])))
     (super-new
      [label (make-button-color-label color)])))
 
 (define init-buttons
-  (for/list ([color '("black" "white" "red" "green" "blue")]
+  (for/list ([color '("black" "white" "red" "green" "blue")] ; initial colors, may be changed
              [i (in-naturals 1)])
-    (define cbt
+    (define name (format "color ~a" i)) ; not the label
+    (define bt
       (new color-button%
+           [keymap-name name]
            [parent bt-panel]
            [color (send the-color-database find-color color)]
-           [get-canvas (λ () cv)]))
-    (λ ()
-      (send keymap add!
-            (format "color ~a" i)
-            (λ () (send cv set-color (get-field color cbt)))
-            (format "~a" i)))))
+           [get-canvas (λ () cv)]
+           [callback (λ _ (send cv set-color (get-field color bt)))]))
+    bt))
 
-(define bt-undo (new button% [parent bt-panel] [label "Undo"]
-                      [callback (λ (bt ev)
-                                  (send cv undo-command))]))
+(define bt-erase (new keymapped-button% [parent bt-panel] [label "Clear"]
+                      [keymap-name "clear"]
+                      [callback (λ (bt ev) (send cv clear-commands))]))
+
+(define bt-undo (new keymapped-button% [parent bt-panel] [label "Undo"]
+                     [keymap-name "undo"]
+                     [callback (λ (bt ev)
+                                 (send cv undo-command))]))
 
 (void (new grow-box-spacer-pane% [parent bt-panel]))
 
-(define bt-open (new button% [parent bt-panel] [label "Open"]
+(define bt-open (new keymapped-button% [parent bt-panel] [label "Open"]
+                     [keymap-name "open"]
                      [callback
                       (λ (bt ev)
                         (define f
@@ -237,7 +305,8 @@
                                     '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
                         (when f (send cv open-file f)))]))
 
-(define bt-save (new button% [parent bt-panel] [label "Save"]
+(define bt-save (new keymapped-button% [parent bt-panel] [label "Save"]
+                     [keymap-name "save"]
                      [callback
                       (λ (bt ev)
                         (define f
@@ -245,19 +314,40 @@
                                     '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
                           (when f (send cv save-file f)))]))
 
-(define bt-shortcuts (new button% [parent bt-panel] [label "&Shortcuts"]
+(define bt-shortcuts (new keymapped-button% [parent bt-panel] [label "&Shortcuts"]
+                          [keymap-name "shortcuts"]
                           [callback
                            (λ (bt ev)
                              (new search-list-box-frame% [parent fr] [label "Shortcuts"]
                                   [contents
-                                   (sort (send keymap get-shortcuts)
-                                         string<=? #:key second)]
+                                   (sort (hash->list (send keymap get-mappings))
+                                         string<=? #:key cdr)]
                                   [key (λ (content)
-                                         (string-append (~a (first content))
+                                         (string-append (~a (simplify-event-dict (car content)))
                                                         "\t"
-                                                        (second content)))]
+                                                        (cdr content)))]
                                   [callback (λ (idx lbl content)
-                                              (send keymap call (second content)))]))]))
+                                              (send keymap call-function (cdr content) #f (new key-event%)))]))]))
+
+(define bt-map-function (new keymapped-button% [parent bt-panel] [label "New shortcut"]
+                             [keymap-name "new-shortcut"]
+                             [callback
+                              (λ _
+                                (keymap-map-function/frame keymap
+                                                           #:parent fr
+                                                           #:callback
+                                                           (λ (keymap name ev)
+                                                             (when ev (save-keymap)))))]))
+
+(define bt-unmap-function (new keymapped-button% [parent bt-panel] [label "Remove shortcut"]
+                               [keymap-name "remove-shortcut"]
+                               [callback
+                                (λ _
+                                  (keymap-remove-mapping/frame keymap
+                                                               #:parent fr
+                                                               #:callback
+                                                               (λ (keymap name ev)
+                                                                 (when ev (save-keymap)))))]))
 
 (define width-slider (new slider% [parent fr] [label "Line width"]
                           [min-value line-width-min]
@@ -277,4 +367,7 @@
                    (send width-slider set-value (send cv get-line-width))
                    (send width-slider refresh))]))
 
-(for-each (λ (thk) (thk)) init-buttons) ; must be done once cv has a value
+(load-keymap) ; in case one already exists
+
+(module+ drracket  
+  (send fr show #t))
