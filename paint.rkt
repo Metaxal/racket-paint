@@ -258,6 +258,7 @@
 (send button-keymap add-function
       "change-color-button-callback-mapping"
       (λ (bt bt-ev)
+        (displayln "yes")
         (when (is-a? bt keymapped-callback<%>)
           (define ev (show-event-listener-dialog #:parent (send bt get-top-level-window)))
           (when ev
@@ -268,44 +269,68 @@
             (save-keymap))))
       (new mouse-event% [event-type 'left-down] [control-down #true]))
 
-(define color-button%
-  (class button% 
-    (init-field get-canvas
-                [color (send the-color-database find-color "black")])
-    (define/override (on-subwindow-event bt ev)
-      (or
-       (super on-subwindow-event bt ev) ; let the parent process first
-       (case (send ev get-event-type)
-        [(left-up)
-         (send (get-canvas) set-color color)
-         #f] ; #f just to get the button press feel
-        [(right-up)
-         (define c (get-color-from-user #f #f color))
-         (when c
-           (set! color c)
-           (send (get-canvas) set-color c)
-           (send bt set-label (make-button-color-label c))
-           (send bt refresh))
-         #f]
-         [else #t])))
-    (super-new
-     [horiz-margin 0] [vert-margin 0]
-     [label (make-button-color-label color)])))
+;; A message% can't receive events, so we enclose the message in a panel, which can.
+(define color-panel%
+  (class panel%
+    (init-field color callback)
+
+    (define/public (get-color) color)
+    (define/public (set-color c)
+      (set! color c)
+      (send msg set-label (make-button-color-label color)))
+    
+    (super-new [stretchable-width #f] [stretchable-height #f])
+    (define msg
+      (new message% [parent this] [label (make-button-color-label color)]
+           [horiz-margin 0] [vert-margin 0]))))
+
+(define color-button-keymap (new keymap% [parent button-keymap]))
+
+(send color-button-keymap add-function "set-pen-color"
+      (λ (msg-panel ev) (send cv set-color (send msg-panel get-color)))
+      (new mouse-event% [event-type 'left-down]))
+
+(send color-button-keymap add-function "choose-color"
+      (λ (msg-panel ev)
+        (define c (get-color-from-user #f #f (send msg-panel get-color)))
+        (when c
+          (send msg-panel set-color c)
+          (send cv set-color c)
+          (send msg-panel refresh)))
+      (new mouse-event% [event-type 'right-down]))
 
 (define color-buttons
-  (for/list ([color '("black" "white" "red" "green" "blue")] ; initial colors, may be changed
+  (for/list ([color '("black"
+                      (128 128 128) ; gray
+                      "white"
+                      (128 255 0) ; chartreuse (same as racket, off by one)
+                      "green"
+                      (0 255 128) ; spring
+                      "cyan"
+                      (0 127 255) ; azure
+                      "blue"
+                      (127 0 255) ; violet
+                      "magenta"
+                      (255 0 128) ; rose
+                      "red"
+                      (255 128 0) ; orange, but not racket's one
+                      "yellow"
+                      )] ; initial colors, may be changed
              [i (in-naturals 1)])
-    (define name (format "color ~a" i)) ; not the label
+    (define callback-name (format "color ~a" i))
     (define bt
-      (new (keymapped-mixin (keymapped-callback-mixin color-button%))
-           [keymap button-keymap]
+      (new (keymapped-mixin (keymapped-callback-mixin color-panel%)) [parent bt-panel]
+           [callback-name callback-name]
            [callback-keymap canvas-keymap]
-           [callback-name name]
-           [parent bt-panel]
-           [color (send the-color-database find-color color)]
-           [get-canvas (λ () cv)]
-           [callback (λ _ (send cv set-color (get-field color bt)))]))
+           [callback (λ _ (send cv set-color (send bt get-color)))]
+           [keymap color-button-keymap]
+           [color (if (string? color)
+                    (send the-color-database find-color color)
+                    (if (list? color)
+                      (apply make-color color)
+                      color))]))
     bt))
+
 
 (define bt-erase (new (keymapped-mixin (keymapped-callback-mixin button%))
                       [parent bt-panel]
@@ -327,8 +352,6 @@
 
 (define menu-bar (new menu-bar% [parent fr]))
 (define file-menu (new menu% [parent menu-bar] [label "&File"]))
-
-;; TODO: Should we have a `menu-keymap` that holds all the callbacks of the menus?
 
 (send canvas-keymap add-function "open"
       (λ (receiver ev)
@@ -385,6 +408,7 @@
 
 (make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu)
 (make-keymap-menu button-keymap "Buttons" #:parent keymap-menu)
+(make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu)
 
 
 (define width-slider (new slider% [parent fr] [label "Line width"]

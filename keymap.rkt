@@ -228,17 +228,23 @@
     (define/public (call-function name receiver ev)
       (check-argument ev (is-a?/c event%))
       (check-argument name string?)
-      (define ev-dict (event->keymap-event ev))
-      (define fun (and name (hash-ref functions name #f)))
-        (and fun (fun receiver ev))) ; we use the original event%
+      (or
+       (let ([ev-dict (event->keymap-event ev)])
+         (define fun (and name (hash-ref functions name #f)))
+         (and fun (fun receiver ev))) ; we use the original event%
+       ; no dice, let's try the parent keymap
+       (and parent (send parent call-function receiver ev))))
 
     ;; Returns #f if the event is not mapped to a function.
     (define/public (handle-event receiver ev)
       (check-argument ev (is-a?/c event%))
-      (let ([ev-dict (event->keymap-event ev)])
+      (or
+       (let ([ev-dict (event->keymap-event ev)])
         (define name (hash-ref mappings ev-dict #f))
         (define fun (and name (hash-ref functions name #f)))
-        (and fun (fun receiver ev)))) ; we use the original event%
+        (and fun (fun receiver ev))) ; we use the original event%
+       ; no dice, let's try the parent keymap
+       (and parent (send parent handle-event receiver ev))))
     
     (super-new)))
 
