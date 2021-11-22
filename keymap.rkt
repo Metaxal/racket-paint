@@ -5,6 +5,8 @@
          racket/contract
          racket/class
          racket/list
+         racket/format
+         racket/string
          racket/gui/base)
 
 
@@ -121,6 +123,7 @@
     other-caps-key-code
     other-shift-altgr-key-code
     other-shift-key-code
+    wheel-steps
     x
     y))
 
@@ -132,6 +135,28 @@
      (filter-not (λ (p) (or (boolean? (cdr p))
                             (memq (car p) keymap-filtered-keys)))
                  ev-dict))))
+
+(define (simplified-event-dict->string ev-dict)
+  (define props
+    (string-join (map
+                  (λ (s) (string-replace (~a s) "-down" ""))
+                  (dict-ref ev-dict 'properties '())) ":"))
+  (unless (equal? props "")
+    (set! props (string-append props ":")))
+  (case (dict-ref ev-dict 'event-class)
+    [(key-event%)
+     (string-append
+      props
+      (or (~a (dict-ref ev-dict 'key-code #f))
+          (~a (dict-ref ev-dict 'key-release-code #f))))
+     ]
+    [(mouse-event%)
+     (string-append
+      props
+      (~a (dict-ref ev-dict 'event-type)))
+     ]
+    [else (format "~v" ev-dict)])
+  )
 
 (define keymap%
   (class object%
@@ -170,6 +195,10 @@
     (define/public (function-exists? name)
       (check-argument name string?)
       (hash-has-key? functions name))
+
+    (define/public (get-function name) ; can be a substitute for function-exists?
+      (check-argument name string?)
+      (hash-ref functions name #f))
 
     (define/public (get-mapping ev)
       (check-argument ev (or/c (is-a?/c event%) event-dict?))

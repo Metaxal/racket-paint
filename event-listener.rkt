@@ -27,9 +27,15 @@
       (when (event-filter ev-dict)
         (set! last-event-dict ev-dict)
         #;(pretty-write (simplify-event-dict ev-dict))
-        (define str (pretty-format (simplify-event-dict ev-dict)
-                             80
-                             #:mode 'write))
+        (define simple-ev-dict (simplify-event-dict ev-dict))
+        
+        (define str
+          (string-append
+           (simplified-event-dict->string simple-ev-dict)
+           "\n\n"
+           (pretty-format simple-ev-dict
+                          80
+                          #:mode 'write)))
         (define lines (string-split str "\n"))
         (define dc (send this get-dc))
         (send dc clear)
@@ -75,6 +81,20 @@
   (send fr show #t)
   last-ev)
 
+(define (keymap-shortcuts/frame keymap
+                                #:parent [parent #f])
+  (new search-list-box-frame% [parent parent] [label "Shortcuts"]
+               [contents
+                (sort (hash->list (send keymap get-mappings))
+                      string<=? #:key cdr)]
+               [key (λ (content)
+                      (string-append (simplified-event-dict->string
+                                      (simplify-event-dict (car content)))
+                                     "\t"
+                                     (cdr content)))]
+               [callback (λ (idx lbl content)
+                           (send keymap call-function (cdr content) #f (new key-event%)))]))
+
 ;; Another tool to map an existing function to a new event
 (define (keymap-map-function/frame keymap
                                    #:parent [parent #f]
@@ -103,7 +123,8 @@
           (sort (hash->list (send keymap get-mappings))
                 string<=? #:key cdr)]
          [key (λ (content)
-                (string-append (~a (simplify-event-dict (car content)))
+                (string-append (simplified-event-dict->string
+                                (simplify-event-dict (car content)))
                                "\t"
                                (cdr content)))]
          [callback (λ (idx lbl content)

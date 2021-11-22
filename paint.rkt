@@ -26,58 +26,85 @@
 (define (save-keymap)
   (make-directory* rktp-pref-dir)
   (write-to-file
-   (hash->list (send keymap get-mappings))
+   (hash->list (send canvas-keymap get-mappings))
    keymap-file
    #:exists 'replace))
 
 (define (load-keymap)
   (when (file-exists? keymap-file)
-    (send keymap clear-mappings)
+    (send canvas-keymap clear-mappings)
     (define d (file->value keymap-file))
     (for ([(ev-dict name) (in-dict d)])
-      (send keymap map-function name ev-dict))))
+      (send canvas-keymap map-function name ev-dict))))
 
 ;; TODO:
 ;; - draw rectangle, filled-rectangle
 ;; - change background color
 
-(define keymap (new keymap%))
+(define canvas-keymap (new keymap%))
+(define button-keymap (new keymap%))
 
-;; TODO: This should be a mixin with an interface for easy checking.
-;; TODO: Export this to keymap.rkt or some othe file
-(define (keymapped%% wnd-class keymap)
-  (check-argument wnd-class (implementation?/c window<%>))
-  (check-argument keymap (is-a?/c keymap%))
-  (cond
-    [(is-a? wnd-class canvas%)
-     (class wnd-class
-       (define/override (on-subwindow-char receiver ev) ; better than `on-char`?
-         (or (send keymap handle-event receiver ev)
-             (super on-subwindow-char receiver ev)))
+
+
+(define keymapped<%>
+  (interface ()
+    get-keymap))
+
+;; Makes the window<%> listen to events and forward them to the keymap.
+;; This applies to most GUI widgets, except menus and menu-items.
+(define keymapped-mixin
+  (mixin (window<%>) (keymapped<%>)
+    (init-field keymap)
     
-       (define/override (on-subwindow-event receiver ev) ; better than `on-event`?
-         (or (send keymap handle-event receiver ev)
-             (super on-subwindow-event receiver ev)))
-
-       (define/override (on-scroll ev)
-         (or (send keymap handle-event this ev)
-             (super on-scroll ev)))
+    (define/public (get-keymap) keymap)
+    
+    (define/override (on-subwindow-char receiver ev) ; better than `on-char`?
+      (or (send keymap handle-event receiver ev)
+          (super on-subwindow-char receiver ev)))
+    
+    (define/override (on-subwindow-event receiver ev) ; better than `on-event`?
+      (or (send keymap handle-event receiver ev)
+          (super on-subwindow-event receiver ev)))
       
-       (super-new))]
-    [else
-     (class wnd-class
-       (define/override (on-subwindow-char receiver ev)
-         (or (send keymap handle-event receiver ev)
-             (super on-subwindow-char receiver ev)))
-    
-       (define/override (on-subwindow-event receiver ev)
-         (or (send keymap handle-event receiver ev)
-             (super on-subwindow-event receiver ev)))
+    (super-new)))
 
-       (super-new))]))
+;; Applies to widgets that have a callback init argument.
+;; If the callback-name is already associated to a function in the keymap,
+;; then the callback must be #f or eq? to that function, otherwise an exception is raised.
+;; Otherwise, the callback is added as a function to the keymap, associated with the
+;; callback-name.
+;; 
+;; We could also simply search the menus for the item callbacks, but then we couldn't
+;; share callbacks.
+(define keymapped-callback<%>
+  (interface ()
+    get-callback-keymap ; may not be the same as for keymapped<%>
+    get-callback-name))
+
+(define keymapped-callback-mixin
+  (mixin () (keymapped-callback<%>)
+    (init callback)
+    (init-field callback-name callback-keymap) ; may not be the same as label, and label may not be text
+    (check-argument callback-name string?)
+
+    (define/public (get-callback-keymap) callback-keymap)
+    (define/public (get-callback-name) callback-name)    
+
+    ; defines the callback if keymap-name already exists
+    (let ([proc (send callback-keymap get-function callback-name)])
+      (if proc
+        (if callback
+          (unless (eq? callback proc)
+            (error "Unused callback: using mapped function" callback-name))
+          (set! callback proc))
+        (if (procedure? callback)
+          (send callback-keymap add-function callback-name callback)
+          (error "Callback must be a procedure" callback))))
+    
+    (super-new [callback callback])))
 
 (define my-canvas%
-  (class (keymapped%% canvas% keymap)
+  (class canvas%
     (define color "black")
     (define line-width line-width-init)
     (define commands '())
@@ -201,22 +228,23 @@
 
     
     (begin
-      (send keymap add-function "increase-brush-size"
+      (send canvas-keymap add-function "increase-brush-size"
             (λ _ (set-line-width (min line-width-max (+ line-width 1))))
             (new key-event% [key-code #\+] [control-down #true])
             (new key-event% [key-code #\x])
-            (new key-event% [key-code 'wheelup]))
-      (send keymap add-function "decrease-brush-size"
+            (new key-event% [key-code 'wheel-up]))
+      (send canvas-keymap add-function "decrease-brush-size"
             (λ _ (set-line-width (max line-width-min (- line-width 1))))
             (new key-event% [key-code #\-] [control-down #true])
             (new key-event% [key-code #\y])
-            (new key-event% [key-code 'wheeldown])))
+            (new key-event% [key-code 'wheel-down])))
     
     (super-new)
     (send (send this get-dc) set-smoothing 'aligned)
     (clear-commands)))
 
-(define fr (new (keymapped%% frame% keymap)
+(define fr (new frame% #;(keymapped%% frame%)
+                #;[keymap keymap]
                 [label "Racket Paint"]
                 [width 500] [height 500]))
 
@@ -225,37 +253,28 @@
 (define (make-button-color-label color)
   (pict->bitmap (colorize (filled-rectangle 20 20) color)))
 
-(define keymapped-button%
-  (class button%
-    (init callback)
-    (init-field keymap-name) ; may not be the same as label, and label may not be text
-    (check-argument keymap-name string?)
+;; Change the keymap mappings for the callback of a selected widget,
+;; if it is a keymapped-callback-widget<%>.
+(send button-keymap add-function
+      "change-color-button-callback-mapping"
+      (λ (bt bt-ev)
+        (when (is-a? bt keymapped-callback<%>)
+          (define ev (show-event-listener-dialog #:parent (send bt get-top-level-window)))
+          (when ev
+            (define keymap (send bt get-callback-keymap))
+            (define callback-name (send bt get-callback-name))
+            (send keymap remove-function-mappings callback-name) ; remove all old shortcuts
+            (send keymap map-function callback-name ev)
+            (save-keymap))))
+      (new mouse-event% [event-type 'left-down] [control-down #true]))
 
-    (send keymap add-function keymap-name callback)
-    
-    (define/override (on-subwindow-event bt bt-ev)
-      (cond
-        [(and (eq? (send bt-ev get-event-type)
-                   'left-up)
-              (send bt-ev get-control-down))
-         (define ev (show-event-listener-dialog #:parent (send this get-top-level-window)))
-         (when ev
-           (send keymap remove-function-mappings keymap-name) ; remove old shortcut
-           (send keymap map-function keymap-name ev)
-           (save-keymap))]
-        [else (super on-subwindow-event bt bt-ev)]))
-    
-    (super-new [callback callback])))
-
-;; TODO: Make the ctrl-click to change the shortcut a mixin!
-;;  and use that for all buttons and more!
 (define color-button%
-  (class keymapped-button%
+  (class button% 
     (init-field get-canvas
                 [color (send the-color-database find-color "black")])
     (define/override (on-subwindow-event bt ev)
       (or
-       (super on-subwindow-event bt ev)
+       (super on-subwindow-event bt ev) ; let the parent process first
        (case (send ev get-event-type)
         [(left-up)
          (send (get-canvas) set-color color)
@@ -270,84 +289,103 @@
          #f]
          [else #t])))
     (super-new
+     [horiz-margin 0] [vert-margin 0]
      [label (make-button-color-label color)])))
 
-(define init-buttons
+(define color-buttons
   (for/list ([color '("black" "white" "red" "green" "blue")] ; initial colors, may be changed
              [i (in-naturals 1)])
     (define name (format "color ~a" i)) ; not the label
     (define bt
-      (new color-button%
-           [keymap-name name]
+      (new (keymapped-mixin (keymapped-callback-mixin color-button%))
+           [keymap button-keymap]
+           [callback-keymap canvas-keymap]
+           [callback-name name]
            [parent bt-panel]
            [color (send the-color-database find-color color)]
            [get-canvas (λ () cv)]
            [callback (λ _ (send cv set-color (get-field color bt)))]))
     bt))
 
-(define bt-erase (new keymapped-button% [parent bt-panel] [label "Clear"]
-                      [keymap-name "clear"]
+(define bt-erase (new (keymapped-mixin (keymapped-callback-mixin button%))
+                      [parent bt-panel]
+                      [label "Clear"]
+                      [keymap button-keymap]
+                      [callback-keymap canvas-keymap]
+                      [callback-name "clear"]
                       [callback (λ (bt ev) (send cv clear-commands))]))
 
-(define bt-undo (new keymapped-button% [parent bt-panel] [label "Undo"]
-                     [keymap-name "undo"]
-                     [callback (λ (bt ev)
-                                 (send cv undo-command))]))
+(define bt-undo (new (keymapped-mixin (keymapped-callback-mixin button%))
+                     [parent bt-panel]
+                     [label "Undo"]
+                     [keymap button-keymap]
+                     [callback-keymap canvas-keymap]
+                     [callback-name "undo"]
+                     [callback (λ (bt ev) (send cv undo-command))]))
 
 (void (new grow-box-spacer-pane% [parent bt-panel]))
 
-(define bt-open (new keymapped-button% [parent bt-panel] [label "Open"]
-                     [keymap-name "open"]
-                     [callback
-                      (λ (bt ev)
-                        (define f
-                          (get-file "Open a file" fr #f #f "rktp" '()
-                                    '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
-                        (when f (send cv open-file f)))]))
+(define menu-bar (new menu-bar% [parent fr]))
+(define file-menu (new menu% [parent menu-bar] [label "&File"]))
 
-(define bt-save (new keymapped-button% [parent bt-panel] [label "Save"]
-                     [keymap-name "save"]
-                     [callback
-                      (λ (bt ev)
-                        (define f
-                          (put-file "Save file" fr #f #f "rktp" '()
-                                    '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
-                          (when f (send cv save-file f)))]))
+;; TODO: Should we have a `menu-keymap` that holds all the callbacks of the menus?
 
-(define bt-shortcuts (new keymapped-button% [parent bt-panel] [label "&Shortcuts"]
-                          [keymap-name "shortcuts"]
-                          [callback
-                           (λ (bt ev)
-                             (new search-list-box-frame% [parent fr] [label "Shortcuts"]
-                                  [contents
-                                   (sort (hash->list (send keymap get-mappings))
-                                         string<=? #:key cdr)]
-                                  [key (λ (content)
-                                         (string-append (~a (simplify-event-dict (car content)))
-                                                        "\t"
-                                                        (cdr content)))]
-                                  [callback (λ (idx lbl content)
-                                              (send keymap call-function (cdr content) #f (new key-event%)))]))]))
+(send canvas-keymap add-function "open"
+      (λ (receiver ev)
+        (define f
+          (get-file "Open a file" fr #f #f "rktp" '()
+                    '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
+        (when f (send cv open-file f)))
+      (new key-event% [key-code #\o] [control-down #true]))
 
-(define bt-map-function (new keymapped-button% [parent bt-panel] [label "New shortcut"]
-                             [keymap-name "new-shortcut"]
-                             [callback
-                              (λ _
-                                (keymap-map-function/frame keymap
-                                                           #:parent fr
-                                                           #:callback
-                                                           (λ (keymap name ev)
-                                                             (when ev (save-keymap)))))]))
+(send canvas-keymap add-function "save"
+      (λ (receiver ev)
+        (define f
+          (put-file "Save file" fr #f #f "rktp" '()
+                    '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
+        (when f (send cv save-file f)))
+      (new key-event% [key-code #\s] [control-down #true]))
 
-(define bt-unmap-function (new keymapped-button% [parent bt-panel] [label "Remove shortcut"]
-                               [keymap-name "remove-shortcut"]
-                               [callback
-                                (λ _
-                                  (keymap-remove-mapping/frame keymap
-                                                               #:parent fr
-                                                               #:callback
-                                                               (λ (keymap name ev)
-                                                                 (when ev (save-keymap)))))]))
+(define file:open-menu-item
+  (new menu-item% [parent file-menu] [label "Open"]
+       [callback (send canvas-keymap get-function "open")]))
+
+(define file:save-menu-item
+  (new menu-item% [parent file-menu] [label "Save"]
+       [callback (send canvas-keymap get-function "save")]))
+
+
+(define keymap-menu (new menu% [parent menu-bar] [label "Keymaps"]))
+
+(define (make-keymap-menu kmp label #:parent parent-menu)
+  (define submenu (new menu% [parent parent-menu] [label label]))
+  (list
+   submenu
+   (new menu-item% [parent submenu] [label "Shortcuts"]
+        [callback
+         (λ (bt ev) (keymap-shortcuts/frame kmp #:parent fr))])
+  
+   (new menu-item% [parent submenu] [label "New shortcut"]
+        [callback
+         (λ _
+           (keymap-map-function/frame kmp
+                                      #:parent fr
+                                      #:callback
+                                      (λ (keymap name ev)
+                                        (when ev (save-keymap)))))])
+  
+   (new menu-item% [parent submenu] [label "Remove shortcut"]
+        [callback
+         (λ _
+           (keymap-remove-mapping/frame kmp
+                                        #:parent fr
+                                        #:callback
+                                        (λ (keymap name ev)
+                                          (when ev (save-keymap)))))])))
+
+(make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu)
+(make-keymap-menu button-keymap "Buttons" #:parent keymap-menu)
+
 
 (define width-slider (new slider% [parent fr] [label "Line width"]
                           [min-value line-width-min]
@@ -356,7 +394,8 @@
                           [callback (λ (sl ev)
                                       (send cv set-line-width (send sl get-value)))]))
 
-(define cv (new my-canvas% [parent fr]
+(define cv (new (keymapped-mixin my-canvas%) [parent fr]
+                [keymap canvas-keymap]
                 [on-set-line-width
                  (λ (cv width)
                    (send width-slider set-value width)
