@@ -8,7 +8,16 @@
 
 (define mcanvas%
   (class canvas%
-    (init-field [event-filter values])
+    (init-field [full-event? #false])
+    (define filtered-ev-types '(motion enter leave shift rshift control rcontrol release))
+
+    (define/public (filter-event-type ev-type yes?)
+      (set! filtered-ev-types (remq ev-type filtered-ev-types))
+      (unless yes?
+        (set! filtered-ev-types (cons ev-type filtered-ev-types))))
+
+    (define/public (filter-event-type? ev-type)
+      (memq ev-type filtered-ev-types))
 
     (define last-event-dict #f)
     (define/public (get-last-event-dict) last-event-dict)
@@ -24,7 +33,10 @@
 
     (define/public (handle-event receiver ev)
       (define ev-dict (event->dict ev))
-      (when (event-filter ev-dict)
+      (unless (memq
+               (or (dict-ref ev-dict 'event-type #f)
+                   (dict-ref ev-dict 'key-cod '()))
+               filtered-ev-types)
         (set! last-event-dict ev-dict)
         #;(pretty-write (simplify-event-dict ev-dict))
         (define simple-ev-dict (simplify-event-dict ev-dict))
@@ -33,7 +45,7 @@
           (string-append
            (simplified-event-dict->string simple-ev-dict)
            "\n\n"
-           (pretty-format simple-ev-dict
+           (pretty-format (if full-event? ev-dict simple-ev-dict)
                           80
                           #:mode 'write)))
         (define lines (string-split str "\n"))
@@ -53,17 +65,23 @@
   (define fr (new dialog% [label "Get event"] [parent parent]
                   [width 500] [height 400]))
 
-  (define cv (new mcanvas% [parent fr]
-                  [event-filter
-                   (λ (ev-dict)
-                     (or
-                      #;#true
-                      (and (not (memq (dict-ref ev-dict 'event-type #f)
-                                      '(motion enter leave)))
-                           (not (memq (dict-ref ev-dict 'key-code #f)
-                                      '(shift rshift control rcontrol release)))))
-                     #;(eq? 'left-down (dict-ref data 'event-type #f)))]))
+  (define cv (new mcanvas% [parent fr]))
 
+  (define cbx-panel (new horizontal-panel% [parent fr]
+                         [alignment '(center center)]
+                         [stretchable-height #f]))
+  (for ([type (in-list '(motion enter leave shift rshift control rcontrol release))])
+    (new check-box% [parent cbx-panel]
+         [label (format "~a" type)]
+         [value (not (send cv filter-event-type? type))]
+         [callback (λ (cb ev)
+                     (send cv filter-event-type type (send cb get-value)))]))
+
+  (void (new check-box% [parent fr]
+             [label "full event"]
+             [value (get-field full-event? cv)]
+             [callback (λ (cb ev) (set-field! full-event? cv (send cb get-value)))]))
+  
   (define ok-cancel-panel (new horizontal-panel% [parent fr]
                                [alignment '(center center)]
                                [stretchable-height #f]))
@@ -76,6 +94,7 @@
                          [callback (λ (bt ev)
                                      (set! last-ev #false)
                                      (send fr show #f))]))
+
 
   (send cv focus)
   (send fr show #t)

@@ -95,13 +95,17 @@
       (if proc
         (if callback
           (unless (eq? callback proc)
-            (error "Unused callback: using mapped function" callback-name))
+            (error "Unused callback; mapped function already exists" callback-name))
           (set! callback proc))
         (if (procedure? callback)
           (send callback-keymap add-function callback-name callback)
           (error "Callback must be a procedure" callback))))
     
     (super-new [callback callback])))
+
+;==================;
+;=== The canvas ===;
+;==================;
 
 (define my-canvas%
   (class canvas%
@@ -114,12 +118,24 @@
                 [background-color "white"])
     
     (define/override (on-event ev)
-      (when (send ev get-left-down)
-        (when (send ev button-changed? 'left)
-          (new-line))
-        (define x (send ev get-x))
-        (define y (send ev get-y))
-        (add-point x y)))
+      (case tool
+
+        [(filled-rectangle)
+         (when (send ev get-left-down)
+           (define x (send ev get-x))
+           (define y (send ev get-y))
+           (if (send ev button-changed? 'left)
+             (new-filled-rectangle x y)
+             (change-filled-rectangle x y))
+           (send this refresh))]
+        
+        [(freehand)
+         (when (send ev get-left-down)
+           (when (send ev button-changed? 'left)
+             (new-line))
+           (define x (send ev get-x))
+           (define y (send ev get-y))
+           (add-point x y))]))
 
     (define/public (get-commands)
       commands)
@@ -141,6 +157,18 @@
                 [`((color ,c-old) . ,rst) rst] ; replace
                 [else commands])))
       (do-last-command))
+
+    (define/public (new-filled-rectangle x y)
+      (set! commands (cons (list 'filled-rectangle x y x y)
+                           commands)))
+
+    (define/public (change-filled-rectangle x y)
+      (match commands
+        [(list-rest (list 'filled-rectangle x1 y1 x2 y2) rst) ; already a new line
+         (set! commands (cons (list 'filled-rectangle x1 y1 x y) rst))]
+        [else
+         ; start a new rectangle
+         (set! commands (cons (list 'filled-rectangle x y x y) commands))]))
 
     (define/public (new-line)
       ; start a new line
@@ -183,6 +211,7 @@
       (on-set-line-width this w))
 
     (define/public (set-tool t)
+      (check-argument t (one-of/c 'freehand 'filled-rectangle 'rectangle 'circle 'disk))
       (set! tool t))
 
     (define/public (undo-command)
@@ -209,6 +238,9 @@
                (send p get-width) 'solid)]
         [`(points . ,pts)
          (send dc draw-lines pts)]
+        [(list 'filled-rectangle x1 y1 x2 y2)
+         (send dc set-brush (send (send dc get-pen) get-color) 'solid)
+         (send dc draw-rectangle (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1)))]
         [else (error "Unknown command: " cmd)]))
 
     (define/public (do-last-command [dc (send this get-dc)])
@@ -250,6 +282,10 @@
 
 (define bt-panel (new horizontal-panel% [parent fr] [stretchable-height #f]))
 
+;=====================;
+;=== Color buttons ===;
+;=====================;
+
 (define (make-button-color-label color)
   (pict->bitmap (colorize (filled-rectangle 20 20) color)))
 
@@ -267,7 +303,7 @@
             (send keymap remove-function-mappings callback-name) ; remove all old shortcuts
             (send keymap map-function callback-name ev)
             (save-keymap))))
-      (new mouse-event% [event-type 'left-down] [control-down #true]))
+      (new mouse-event% [event-type 'left-down] [left-down #t] [control-down #true]))
 
 ;; A message% can't receive events, so we enclose the message in a panel, which can.
 (define color-panel%
@@ -287,19 +323,20 @@
 (define color-button-keymap (new keymap% [parent button-keymap]))
 
 (send color-button-keymap add-function "set-pen-color"
-      (λ (msg-panel ev) (send cv set-color (send msg-panel get-color)))
-      (new mouse-event% [event-type 'left-down]))
+      (λ (msg-panel ev) (send canvas set-color (send msg-panel get-color)))
+      (new mouse-event% [event-type 'left-down] [left-down #t]))
 
 (send color-button-keymap add-function "choose-color"
       (λ (msg-panel ev)
         (define c (get-color-from-user #f #f (send msg-panel get-color)))
         (when c
           (send msg-panel set-color c)
-          (send cv set-color c)
+          (send canvas set-color c)
           (send msg-panel refresh)))
-      (new mouse-event% [event-type 'right-down]))
+      (new mouse-event% [event-type 'right-down] [right-down #t]))
 
 (define color-buttons
+  ; Color values from Wikipedia
   (for/list ([color '("black"
                       (128 128 128) ; gray
                       "white"
@@ -320,10 +357,10 @@
     (define callback-name (format "color ~a" i))
     (define bt
       (new (keymapped-mixin (keymapped-callback-mixin color-panel%)) [parent bt-panel]
+           [keymap color-button-keymap]
            [callback-name callback-name]
            [callback-keymap canvas-keymap]
-           [callback (λ _ (send cv set-color (send bt get-color)))]
-           [keymap color-button-keymap]
+           [callback (λ _ (send canvas set-color (send bt get-color)))]
            [color (if (string? color)
                     (send the-color-database find-color color)
                     (if (list? color)
@@ -331,6 +368,9 @@
                       color))]))
     bt))
 
+;===============;
+;=== Buttons ===;
+;===============;
 
 (define bt-erase (new (keymapped-mixin (keymapped-callback-mixin button%))
                       [parent bt-panel]
@@ -338,7 +378,7 @@
                       [keymap button-keymap]
                       [callback-keymap canvas-keymap]
                       [callback-name "clear"]
-                      [callback (λ (bt ev) (send cv clear-commands))]))
+                      [callback (λ (bt ev) (send canvas clear-commands))]))
 
 (define bt-undo (new (keymapped-mixin (keymapped-callback-mixin button%))
                      [parent bt-panel]
@@ -346,9 +386,55 @@
                      [keymap button-keymap]
                      [callback-keymap canvas-keymap]
                      [callback-name "undo"]
-                     [callback (λ (bt ev) (send cv undo-command))]))
+                     [callback (λ (bt ev) (send canvas undo-command))]))
+
+(define bt-freehand
+  (new (keymapped-mixin (keymapped-callback-mixin button%))
+       [parent bt-panel]
+       [label "hand"]
+       [keymap button-keymap]
+       [callback-keymap canvas-keymap]
+       [callback-name "freehand"]
+       [callback (λ (bt ev) (send canvas set-tool 'freehand))]))
+
+(define bt-filled-rectangle
+  (new (keymapped-mixin (keymapped-callback-mixin button%))
+       [parent bt-panel]
+       [label (pict->bitmap (filled-rectangle 20 10 #:color "black"))]
+       [keymap button-keymap]
+       [callback-keymap canvas-keymap]
+       [callback-name "filled-rectangle"]
+       [callback (λ (bt ev) (send canvas set-tool 'filled-rectangle))]))
 
 (void (new grow-box-spacer-pane% [parent bt-panel]))
+
+
+(define width-slider (new slider% [parent fr] [label "Line width"]
+                          [min-value line-width-min]
+                          [max-value line-width-max]
+                          [init-value line-width-init]
+                          [callback (λ (sl ev)
+                                      (send canvas set-line-width (send sl get-value)))]))
+
+;==============;
+;=== Canvas ===;
+;==============;
+
+(define canvas (new (keymapped-mixin my-canvas%) [parent fr]
+                [keymap canvas-keymap]
+                [on-set-line-width
+                 (λ (cv width)
+                   (send width-slider set-value width)
+                   (send width-slider refresh))]
+                [paint-callback
+                 (λ (cv dc)
+                   (send cv draw dc)
+                   (send width-slider set-value (send cv get-line-width))
+                   (send width-slider refresh))]))
+
+;=============;
+;=== Menus ===;
+;=============;
 
 (define menu-bar (new menu-bar% [parent fr]))
 (define file-menu (new menu% [parent menu-bar] [label "&File"]))
@@ -358,7 +444,7 @@
         (define f
           (get-file "Open a file" fr #f #f "rktp" '()
                     '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
-        (when f (send cv open-file f)))
+        (when f (send canvas open-file f)))
       (new key-event% [key-code #\o] [control-down #true]))
 
 (send canvas-keymap add-function "save"
@@ -366,7 +452,7 @@
         (define f
           (put-file "Save file" fr #f #f "rktp" '()
                     '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
-        (when f (send cv save-file f)))
+        (when f (send canvas save-file f)))
       (new key-event% [key-code #\s] [control-down #true]))
 
 (define file:open-menu-item
@@ -377,8 +463,13 @@
   (new menu-item% [parent file-menu] [label "Save"]
        [callback (send canvas-keymap get-function "save")]))
 
-
 (define keymap-menu (new menu% [parent menu-bar] [label "Keymaps"]))
+
+(define keymap:delete-keymap-file-menu-item
+  (new menu-item% [parent keymap-menu] [label "Delete keymap file"]
+       [callback (λ _ (when (file-exists? keymap-file) (delete-file keymap-file)))]))
+
+(void (new separator-menu-item% [parent keymap-menu]))
 
 (define (make-keymap-menu kmp label #:parent parent-menu)
   (define submenu (new menu% [parent parent-menu] [label label]))
@@ -410,27 +501,11 @@
 (make-keymap-menu button-keymap "Buttons" #:parent keymap-menu)
 (make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu)
 
-
-(define width-slider (new slider% [parent fr] [label "Line width"]
-                          [min-value line-width-min]
-                          [max-value line-width-max]
-                          [init-value line-width-init]
-                          [callback (λ (sl ev)
-                                      (send cv set-line-width (send sl get-value)))]))
-
-(define cv (new (keymapped-mixin my-canvas%) [parent fr]
-                [keymap canvas-keymap]
-                [on-set-line-width
-                 (λ (cv width)
-                   (send width-slider set-value width)
-                   (send width-slider refresh))]
-                [paint-callback
-                 (λ (cv dc)
-                   (send cv draw dc)
-                   (send width-slider set-value (send cv get-line-width))
-                   (send width-slider refresh))]))
-
 (load-keymap) ; in case one already exists
 
-(module+ drracket  
+(module+ drracket
+  (send canvas-keymap add-function "print-commands"
+        (λ _ (writeln (send canvas get-commands)))
+        (new key-event% [key-code 'f12]))
+  
   (send fr show #t))

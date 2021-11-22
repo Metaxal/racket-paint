@@ -83,12 +83,15 @@
   `((event-class     . mouse-event%) ; symbol, not actual class, to be serializable
     (event-type      . ,(send ev get-event-type))
     (buttons-changed . ,(for-all-buttons ev button-changed?))
-    (buttons-down    . ,(for-all-buttons ev button-down?))
-    (buttons-up      . ,(for-all-buttons ev button-up?))
-    (dragging?       . ,(send ev dragging?))
-    (entering?       . ,(send ev entering?))
-    (leaving?        . ,(send ev leaving?))
-    (moving?         . ,(send ev moving?))
+    #;(buttons-down    . ,(for-all-buttons ev button-down?)) ; unreliable
+    #;(buttons-up      . ,(for-all-buttons ev button-up?))
+    (left-down       . ,(send ev get-left-down))
+    (middle-down     . ,(send ev get-middle-down))
+    (right-down      . ,(send ev get-right-down))
+    (dragging        . ,(send ev dragging?))
+    (entering        . ,(send ev entering?))
+    (leaving         . ,(send ev leaving?))
+    (moving          . ,(send ev moving?))
     (alt-down        . ,(send ev get-alt-down))
     (caps-down       . ,(send ev get-caps-down))
     (control-down    . ,(send ev get-control-down))
@@ -148,13 +151,11 @@
      (string-append
       props
       (or (~a (dict-ref ev-dict 'key-code #f))
-          (~a (dict-ref ev-dict 'key-release-code #f))))
-     ]
+          (~a (dict-ref ev-dict 'key-release-code #f))))]
     [(mouse-event%)
      (string-append
       props
-      (~a (dict-ref ev-dict 'event-type)))
-     ]
+      (~a (dict-ref ev-dict 'event-type)))]
     [else (format "~v" ev-dict)])
   )
 
