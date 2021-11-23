@@ -445,7 +445,7 @@
                (dc (λ (dc dx dy)
                      (define old-pen (send dc get-pen))
                      (send dc set-pen "black" 1 'solid)
-                     (send dc draw-line 0 dy dx 0)
+                     (send dc draw-line 0 10 20 0)
                      (send dc set-pen old-pen))
                    20 10))]
        [keymap button-keymap]
