@@ -3,10 +3,13 @@ racket-paint
 
 A simple paint program written in Racket.
 
-<img src="https://user-images.githubusercontent.com/1658140/142733261-92bfd15e-4475-49ba-9fb4-83a64d456f8b.png">
+<!-- img src="https://user-images.githubusercontent.com/1658140/142733261-92bfd15e-4475-49ba-9fb4-83a64d456f8b.png" -->
+![Screenshot from 2021-11-23 22-23-19](https://user-images.githubusercontent.com/1658140/143145595-b41c4df7-4511-4e3c-9c44-f68ccf0220a8.png)
+
 
 
 # Installation
+
 
 From DrRacket:
 1. Install: In DrRacket, click on `File|Install Package…` then type `racket-paint` and Enter.
