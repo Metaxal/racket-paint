@@ -413,6 +413,8 @@
 ;=== Buttons ===;
 ;===============;
 
+;; TODO: Each button action should give the focus back to the canvas
+
 (define bt-erase (new (keymapped-mixin (keymapped-callback-mixin button%))
                       [parent bt-panel]
                       [label "Clear"]
@@ -432,7 +434,21 @@
 (define bt-freehand
   (new (keymapped-mixin (keymapped-callback-mixin button%))
        [parent bt-panel]
-       [label "hand"]
+       [label (pict->bitmap
+               (dc (λ (dc dx dy)
+                     (define old-pen (send dc get-pen))
+                     (define-values (old-scale-x old-scale-y) (send dc get-scale))
+                     (send dc set-pen "black" 1 'solid)
+                     (send dc set-scale 0.3 0.3)
+                     (send dc draw-lines
+                           '((37 . 4)
+                             (37 . 4) (38 . 2) (38 . 2) (40 . 1) (43 . 0) (45 . 0) (47 . 2)
+                             (49 . 4) (51 . 7) (51 . 9) (51 . 14) (50 . 17) (48 . 22) (46 . 25)
+                             (45 . 26) (42 . 27) (39 . 27) (36 . 26) (32 . 21) (28 . 16) (24 . 10)
+                             (17 . 4) (11 . 2) (8 . 2) (3 . 5) (0 . 10) (0 . 13) (0 . 15) (0 . 15)))
+                     (send dc set-scale old-scale-x old-scale-y)
+                     (send dc set-pen old-pen))
+                   20 10))]
        [keymap button-keymap]
        [callback-keymap canvas-keymap]
        [callback-name "freehand"]
