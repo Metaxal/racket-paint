@@ -12,7 +12,8 @@
          racket/list
          racket/dict
          racket/file
-         racket/format)
+         racket/format
+         racket/math)
 
 (provide (all-defined-out))
 
@@ -117,7 +118,7 @@
     (init-field [on-set-line-width (λ (cv width) (void))]
                 [background-color "white"])
 
-    (define shapes '(ellipse rectangle))
+    (define shapes '(line ellipse rectangle))
     (define filled? #false)
     
     (define/override (on-event ev)
@@ -126,9 +127,11 @@
          (when (send ev get-left-down)
            (define x (send ev get-x))
            (define y (send ev get-y))
+           (define square? (send ev get-shift-down))
+           (define centered? (send ev get-control-down))
            (if (send ev button-changed? 'left)
              (new-shape tool x y #:filled? filled?)
-             (change-shape tool x y #:filled? filled?))
+             (change-shape tool x y #:filled? filled? #:square? square? #:centered? centered?))
            (send this refresh))]
         
         [(eq? tool 'freehand)
@@ -161,13 +164,20 @@
       (do-last-command))
 
     (define/public (new-shape shape x y #:filled? filled?)
-      (set! commands (cons (list shape filled? x y x y)
+      (define centered? #false)
+      (set! commands (cons (list shape filled? centered? x y x y)
                            commands)))
 
-    (define/public (change-shape shape x y #:filled? filled?)
+    (define/public (change-shape shape x y #:filled? filled? #:square? square? #:centered? centered?)
       (match commands
-        [(list-rest (list (== shape) (== filled?) x1 y1 x2 y2) rst)
-         (set! commands (cons (list shape filled? x1 y1 x y) rst))]
+        [(list-rest (list (== shape) (== filled?) _old-centered? x1 y1 x2 y2) rst)
+         ; we must not modify (x1, y1)
+         (define new-cmd
+           (if square?
+             (let ([w (max (abs (- x x1)) (abs (- y y1)))])
+               (list shape filled? centered? x1 y1 (+ x1 (* w (sgn (- x x1)))) (+ y1 (* w (sgn (- y y1))))))
+             (list shape filled? centered? x1 y1 x y)))
+         (set! commands (cons new-cmd rst))]
         [else
          (new-shape shape x y #:filled? filled?)]))
 
@@ -178,12 +188,14 @@
          (void)]
         [else (set! commands (cons '(points) commands))]))
 
+    ;; freehand tool
     (define/public (get-last-point)
       (match commands
         [(list-rest (list-rest 'points (cons x y) _rst-pts) _rst-cmds)
          (cons x y)]
         [else #false]))
     
+    ;; freehand tool    
     (define/public (add-point x y)
       (define pos (cons x y))
       (define-values (prev-points rest-commands)
@@ -244,15 +256,30 @@
         [`(points . ,pts)
          (send dc draw-lines pts)]
 
-        [(list (and shape (or 'ellipse 'rectangle)) filled? x1 y1 x2 y2)
+        [(list shape filled? centered? x1 y1 x2 y2)
+         #:when (memq shape shapes)
          (if filled?
            (send dc set-brush (send (send dc get-pen) get-color) 'solid)
            (send dc set-brush "black" 'transparent))
-         (case shape
-           [(ellipse)
-            (send dc draw-ellipse (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1)))]
-           [(rectangle)
-            (send dc draw-rectangle (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1)))])]
+         (let*-values ([(xc yc) (values (* .5 (+ x1 x2))
+                                        (* .5 (+ y1 y2)))]
+                       [(x y w h)
+                        (if centered?
+                          (values (min x2 (- (* 2 x1) x2))
+                                  (min y2 (- (* 2 y1) y2))
+                                  (* 2 (abs (- x1 x2)))
+                                  (* 2 (abs (- y1 y2))))
+                          (values (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1))))]
+                       [(xdir ydir) (values (sgn (- x2 x1)) (sgn (- y2 y1)))])
+           (case shape
+             [(line)
+              (if centered?
+                (send dc draw-line (- xc (* xdir w)) (- yc (* ydir h)) (+ xc (* xdir w)) (+ yc (* ydir h)))
+                (send dc draw-line x1 y1 x2 y2))]
+             [(ellipse)
+              (send dc draw-ellipse x y w h)]
+             [(rectangle)
+              (send dc draw-rectangle x y w h)]))]
         
         [else (error "Unknown command: " cmd)]))
 
@@ -410,6 +437,21 @@
        [callback-keymap canvas-keymap]
        [callback-name "freehand"]
        [callback (λ (bt ev) (send canvas set-tool 'freehand))]))
+
+(define bt-line
+  (new (keymapped-mixin (keymapped-callback-mixin button%))
+       [parent bt-panel]
+       [label (pict->bitmap
+               (dc (λ (dc dx dy)
+                     (define old-pen (send dc get-pen))
+                     (send dc set-pen "black" 1 'solid)
+                     (send dc draw-line 0 dy dx 0)
+                     (send dc set-pen old-pen))
+                   20 10))]
+       [keymap button-keymap]
+       [callback-keymap canvas-keymap]
+       [callback-name "line"]
+       [callback (λ (bt ev) (send canvas set-tool 'line #:filled? #false))]))
 
 (define bt-filled-rectangle
   (new (keymapped-mixin (keymapped-callback-mixin button%))

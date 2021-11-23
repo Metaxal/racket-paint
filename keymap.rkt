@@ -15,6 +15,8 @@
 ;;;   Instead, the new keymap may be stupid, but is much easier to customize thanks to
 ;;;   the event listener that will obtain the exact key combination intended to call
 ;;;   a function.
+;;; - Handcrafting a correct mouse-event% is tricky, and varies from plateform to plateform
+;;;   See: https://github.com/racket/gui/issues/252#issuecomment-976522484
 ;;; - easy to check equality between events
 ;;; - serializable events
 ;;; -
