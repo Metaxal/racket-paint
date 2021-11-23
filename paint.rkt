@@ -294,12 +294,13 @@
 (send button-keymap add-function
       "change-color-button-callback-mapping"
       (λ (bt bt-ev)
-        (displayln "yes")
         (when (is-a? bt keymapped-callback<%>)
-          (define ev (show-event-listener-dialog #:parent (send bt get-top-level-window)))
+          (define callback-name (send bt get-callback-name))
+          (define ev (show-event-listener-dialog #:parent (send bt get-top-level-window)
+                                                 #:message (format "Choose a shortcut for: ~a"
+                                                                   callback-name)))
           (when ev
             (define keymap (send bt get-callback-keymap))
-            (define callback-name (send bt get-callback-name))
             (send keymap remove-function-mappings callback-name) ; remove all old shortcuts
             (send keymap map-function callback-name ev)
             (save-keymap))))
@@ -497,9 +498,9 @@
                                         (λ (keymap name ev)
                                           (when ev (save-keymap)))))])))
 
-(make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu)
-(make-keymap-menu button-keymap "Buttons" #:parent keymap-menu)
-(make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu)
+(void (make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu))
+(void (make-keymap-menu button-keymap "Buttons" #:parent keymap-menu))
+(void (make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu))
 
 (load-keymap) ; in case one already exists
 

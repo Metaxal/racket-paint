@@ -6,18 +6,18 @@
 
 (provide (all-defined-out))
 
-(define mcanvas%
-  (class canvas%
+(define meditor-canvas%
+  (class editor-canvas%
     (init-field [full-event? #false])
-    (define filtered-ev-types '(motion enter leave shift rshift control rcontrol release))
+    (define filtered '(motion enter leave shift rshift control rcontrol release))
 
-    (define/public (filter-event-type ev-type yes?)
-      (set! filtered-ev-types (remq ev-type filtered-ev-types))
+    (define/public (filter-type/key ev-type yes?)
+      (set! filtered (remq ev-type filtered))
       (unless yes?
-        (set! filtered-ev-types (cons ev-type filtered-ev-types))))
+        (set! filtered (cons ev-type filtered))))
 
-    (define/public (filter-event-type? ev-type)
-      (memq ev-type filtered-ev-types))
+    (define/public (filter-type/key? ev-type)
+      (memq ev-type filtered))
 
     (define last-event-dict #f)
     (define/public (get-last-event-dict) last-event-dict)
@@ -28,15 +28,12 @@
     (define/override (on-subwindow-event receiver ev)
       (handle-event receiver ev))
 
-    (define/override (on-scroll ev)
-      (handle-event this ev))
-
     (define/public (handle-event receiver ev)
       (define ev-dict (event->dict ev))
       (unless (memq
                (or (dict-ref ev-dict 'event-type #f)
-                   (dict-ref ev-dict 'key-cod '()))
-               filtered-ev-types)
+                   (dict-ref ev-dict 'key-code '()))
+               filtered)
         (set! last-event-dict ev-dict)
         #;(pretty-write (simplify-event-dict ev-dict))
         (define simple-ev-dict (simplify-event-dict ev-dict))
@@ -48,24 +45,23 @@
            (pretty-format (if full-event? ev-dict simple-ev-dict)
                           80
                           #:mode 'write)))
-        (define lines (string-split str "\n"))
-        (define dc (send this get-dc))
-        (send dc clear)
-        (define line-height (send (send dc get-font) get-size))
-        (for ([line (in-list lines)]
-              [i (in-naturals)])
-          (send dc draw-text line 0 (* i (+ 2 line-height))))))
+        (define text (send this get-editor))
+        (send text erase)
+        (send text insert str)))
     
     (super-new)))
 
-(define (show-event-listener-dialog #:parent [parent #f])
+(define (show-event-listener-dialog #:parent [parent #f]
+                                    #:message [message #f])
 
   (define last-ev #f)
   
   (define fr (new dialog% [label "Get event"] [parent parent]
                   [width 500] [height 400]))
+  (when message
+    (void (new message% [parent fr] [label message])))
 
-  (define cv (new mcanvas% [parent fr]))
+  (define cv (new meditor-canvas% [parent fr] [editor (new text%)]))
 
   (define cbx-panel (new horizontal-panel% [parent fr]
                          [alignment '(center center)]
@@ -73,14 +69,17 @@
   (for ([type (in-list '(motion enter leave shift rshift control rcontrol release))])
     (new check-box% [parent cbx-panel]
          [label (format "~a" type)]
-         [value (not (send cv filter-event-type? type))]
+         [value (not (send cv filter-type/key? type))]
          [callback (λ (cb ev)
-                     (send cv filter-event-type type (send cb get-value)))]))
+                     (send cv filter-type/key type (send cb get-value))
+                     (send cv focus))]))
 
   (void (new check-box% [parent fr]
              [label "full event"]
              [value (get-field full-event? cv)]
-             [callback (λ (cb ev) (set-field! full-event? cv (send cb get-value)))]))
+             [callback (λ (cb ev)
+                         (set-field! full-event? cv (send cb get-value))
+                         (send cv focus))]))
   
   (define ok-cancel-panel (new horizontal-panel% [parent fr]
                                [alignment '(center center)]
@@ -94,7 +93,6 @@
                          [callback (λ (bt ev)
                                      (set! last-ev #false)
                                      (send fr show #f))]))
-
 
   (send cv focus)
   (send fr show #t)
