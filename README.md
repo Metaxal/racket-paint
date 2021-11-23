@@ -18,6 +18,10 @@ Or from the command line:
 
 # Usage
 
-Everything should be pretty obvious. Right-click on color buttons to change the color (or 
-to pick one from the screen).
+Everything should be pretty obvious. 
+
+Some notes:
+* Right-click on color buttons to change the color (or to pick one from the screen).
+* Press Control when drawing a shape to center it on the coordinate of the first click.
+* Press Shift when drawing a shape to make it square-like.
 

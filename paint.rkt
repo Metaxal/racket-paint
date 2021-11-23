@@ -85,8 +85,10 @@
 (define keymapped-callback-mixin
   (mixin () (keymapped-callback<%>)
     (init callback)
-    (init-field callback-name callback-keymap) ; may not be the same as label, and label may not be text
+    (init-field callback-name ; may not be the same as label, and label may not be text
+                callback-keymap) ; the keymap in which the callback is installed
     (check-argument callback-name string?)
+    (check-argument callback-keymap (is-a?/c keymap%))
 
     (define/public (get-callback-keymap) callback-keymap)
     (define/public (get-callback-name) callback-name)    
@@ -145,6 +147,8 @@
     (define/public (get-commands)
       commands)
 
+    ;; WARNING: If the user undoes these commands, it may lead to weird behaviour
+    ;; such that the line width varying 
     (define/public (clear-commands)
       (set! commands '())
       (set-color color)
@@ -175,7 +179,9 @@
          (define new-cmd
            (if square?
              (let ([w (max (abs (- x x1)) (abs (- y y1)))])
-               (list shape filled? centered? x1 y1 (+ x1 (* w (sgn (- x x1)))) (+ y1 (* w (sgn (- y y1))))))
+               (list shape filled? centered?
+                     x1 y1
+                     (+ x1 (* w (sgn (- x x1)))) (+ y1 (* w (sgn (- y y1))))))
              (list shape filled? centered? x1 y1 x y)))
          (set! commands (cons new-cmd rst))]
         [else
@@ -274,7 +280,9 @@
            (case shape
              [(line)
               (if centered?
-                (send dc draw-line (- xc (* xdir w)) (- yc (* ydir h)) (+ xc (* xdir w)) (+ yc (* ydir h)))
+                (send dc draw-line
+                      (- xc (* xdir w)) (- yc (* ydir h))
+                      (+ xc (* xdir w)) (+ yc (* ydir h)))
                 (send dc draw-line x1 y1 x2 y2))]
              [(ellipse)
               (send dc draw-ellipse x y w h)]
@@ -596,11 +604,12 @@
                                         (λ (keymap name ev)
                                           (when ev (save-keymap)))))])))
 
+;; TODO: It may be less confusing to the user to 'merge' the view of all the keymaps
 (void (make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu))
 (void (make-keymap-menu button-keymap "Buttons" #:parent keymap-menu))
 (void (make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu))
 
-(load-keymap) ; in case one already exists
+(load-keymap) ; in case one already exists, replaces all previous keybindings
 
 (module+ drracket
   (send canvas-keymap add-function "print-commands"
