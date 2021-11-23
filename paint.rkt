@@ -116,20 +116,22 @@
 
     (init-field [on-set-line-width (λ (cv width) (void))]
                 [background-color "white"])
+
+    (define shapes '(ellipse rectangle))
+    (define filled? #false)
     
     (define/override (on-event ev)
-      (case tool
-
-        [(filled-rectangle)
+      (cond 
+        [(memq tool shapes)
          (when (send ev get-left-down)
            (define x (send ev get-x))
            (define y (send ev get-y))
            (if (send ev button-changed? 'left)
-             (new-filled-rectangle x y)
-             (change-filled-rectangle x y))
+             (new-shape tool x y #:filled? filled?)
+             (change-shape tool x y #:filled? filled?))
            (send this refresh))]
         
-        [(freehand)
+        [(eq? tool 'freehand)
          (when (send ev get-left-down)
            (when (send ev button-changed? 'left)
              (new-line))
@@ -158,17 +160,16 @@
                 [else commands])))
       (do-last-command))
 
-    (define/public (new-filled-rectangle x y)
-      (set! commands (cons (list 'filled-rectangle x y x y)
+    (define/public (new-shape shape x y #:filled? filled?)
+      (set! commands (cons (list shape filled? x y x y)
                            commands)))
 
-    (define/public (change-filled-rectangle x y)
+    (define/public (change-shape shape x y #:filled? filled?)
       (match commands
-        [(list-rest (list 'filled-rectangle x1 y1 x2 y2) rst) ; already a new line
-         (set! commands (cons (list 'filled-rectangle x1 y1 x y) rst))]
+        [(list-rest (list (== shape) (== filled?) x1 y1 x2 y2) rst)
+         (set! commands (cons (list shape filled? x1 y1 x y) rst))]
         [else
-         ; start a new rectangle
-         (set! commands (cons (list 'filled-rectangle x y x y) commands))]))
+         (new-shape shape x y #:filled? filled?)]))
 
     (define/public (new-line)
       ; start a new line
@@ -210,8 +211,9 @@
       (do-last-command)
       (on-set-line-width this w))
 
-    (define/public (set-tool t)
-      (check-argument t (one-of/c 'freehand 'filled-rectangle 'rectangle 'circle 'disk))
+    (define/public (set-tool t #:filled? [f? filled?])
+      (check-argument t (apply one-of/c (cons 'freehand shapes)))
+      (set! filled? f?)
       (set! tool t))
 
     (define/public (undo-command)
@@ -229,18 +231,29 @@
 
     (define/public (do-command cmd [dc (send this get-dc)])
       (match cmd
+
         [`(line-width ,w)
          (define p (send dc get-pen))
          (send dc set-pen (send p get-color) w 'solid)]
+        
         [`(color ,c)
          (define p (send dc get-pen))
          (send dc set-pen (if (list? c) (apply make-color c) c)
                (send p get-width) 'solid)]
+
         [`(points . ,pts)
          (send dc draw-lines pts)]
-        [(list 'filled-rectangle x1 y1 x2 y2)
-         (send dc set-brush (send (send dc get-pen) get-color) 'solid)
-         (send dc draw-rectangle (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1)))]
+
+        [(list (and shape (or 'ellipse 'rectangle)) filled? x1 y1 x2 y2)
+         (if filled?
+           (send dc set-brush (send (send dc get-pen) get-color) 'solid)
+           (send dc set-brush "black" 'transparent))
+         (case shape
+           [(ellipse)
+            (send dc draw-ellipse (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1)))]
+           [(rectangle)
+            (send dc draw-rectangle (min x1 x2) (min y1 y2) (abs (- x2 x1)) (abs (- y2 y1)))])]
+        
         [else (error "Unknown command: " cmd)]))
 
     (define/public (do-last-command [dc (send this get-dc)])
@@ -405,7 +418,34 @@
        [keymap button-keymap]
        [callback-keymap canvas-keymap]
        [callback-name "filled-rectangle"]
-       [callback (λ (bt ev) (send canvas set-tool 'filled-rectangle))]))
+       [callback (λ (bt ev) (send canvas set-tool 'rectangle #:filled? #true))]))
+
+(define bt-rectangle
+  (new (keymapped-mixin (keymapped-callback-mixin button%))
+       [parent bt-panel]
+       [label (pict->bitmap (rectangle 20 10 #:border-color "black" #:border-width 1))]
+       [keymap button-keymap]
+       [callback-keymap canvas-keymap]
+       [callback-name "rectangle"]
+       [callback (λ (bt ev) (send canvas set-tool 'rectangle #:filled? #false))]))
+
+(define bt-filled-ellipse
+  (new (keymapped-mixin (keymapped-callback-mixin button%))
+       [parent bt-panel]
+       [label (pict->bitmap (filled-ellipse 20 10 #:color "black"))]
+       [keymap button-keymap]
+       [callback-keymap canvas-keymap]
+       [callback-name "filled-ellipse"]
+       [callback (λ (bt ev) (send canvas set-tool 'ellipse #:filled? #true))]))
+
+(define bt-ellipse
+  (new (keymapped-mixin (keymapped-callback-mixin button%))
+       [parent bt-panel]
+       [label (pict->bitmap (ellipse 20 10 #:border-color "black" #:border-width 1))]
+       [keymap button-keymap]
+       [callback-keymap canvas-keymap]
+       [callback-name "ellipse"]
+       [callback (λ (bt ev) (send canvas set-tool 'ellipse #:filled? #false))]))
 
 (void (new grow-box-spacer-pane% [parent bt-panel]))
 

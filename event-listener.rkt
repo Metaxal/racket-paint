@@ -35,7 +35,6 @@
                    (dict-ref ev-dict 'key-code '()))
                filtered)
         (set! last-event-dict ev-dict)
-        #;(pretty-write (simplify-event-dict ev-dict))
         (define simple-ev-dict (simplify-event-dict ev-dict))
         
         (define str
@@ -52,16 +51,18 @@
     (super-new)))
 
 (define (show-event-listener-dialog #:parent [parent #f]
-                                    #:message [message #f])
+                                    #:message [message #f]
+                                    #:full-event? [full-event? #false])
 
   (define last-ev #f)
   
   (define fr (new dialog% [label "Get event"] [parent parent]
-                  [width 500] [height 400]))
+                  [width 500] [height 600]))
   (when message
     (void (new message% [parent fr] [label message])))
 
   (define cv (new meditor-canvas% [parent fr] [editor (new text%)]))
+  (set-field! full-event? cv full-event?)
 
   (define cbx-panel (new horizontal-panel% [parent fr]
                          [alignment '(center center)]
@@ -153,5 +154,5 @@
   slbf)
 
 (module+ drracket
-  (show-event-listener-dialog))
+  (show-event-listener-dialog #:full-event? #true))
 
