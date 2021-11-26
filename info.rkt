@@ -3,6 +3,7 @@
 (define deps '("gui-lib"
                "pict-lib"
                "search-list-box"
+               "global"
                "base"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/racket-paint.scrbl" ())))

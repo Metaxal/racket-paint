@@ -13,9 +13,15 @@
          racket/dict
          racket/file
          racket/format
-         racket/math)
+         racket/math
+         global)
 
 (provide (all-defined-out))
+
+(define-global *color-button-size* 20
+  "Size of the color buttons"
+  exact-positive-integer?
+  string->number)
 
 (define line-width-init 1)
 (define line-width-min 1)
@@ -39,12 +45,11 @@
       (send canvas-keymap map-function name ev-dict))))
 
 ;; TODO:
-;; - draw rectangle, filled-rectangle
 ;; - change background color
 
 (define canvas-keymap (new keymap%))
 (define button-keymap (new keymap%))
-
+(define color-button-keymap (new keymap% [parent button-keymap]))
 
 
 (define keymapped<%>
@@ -323,37 +328,6 @@
     (send (send this get-dc) set-smoothing 'aligned)
     (clear-commands)))
 
-(define fr (new frame% #;(keymapped%% frame%)
-                #;[keymap keymap]
-                [label "Racket Paint"]
-                [width 500] [height 500]))
-
-(define bt-panel (new horizontal-panel% [parent fr] [stretchable-height #f]))
-
-;=====================;
-;=== Color buttons ===;
-;=====================;
-
-(define (make-button-color-label color)
-  (pict->bitmap (colorize (filled-rectangle 20 20) color)))
-
-;; Change the keymap mappings for the callback of a selected widget,
-;; if it is a keymapped-callback-widget<%>.
-(send button-keymap add-function
-      "change-color-button-callback-mapping"
-      (λ (bt bt-ev)
-        (when (is-a? bt keymapped-callback<%>)
-          (define callback-name (send bt get-callback-name))
-          (define ev (show-event-listener-dialog #:parent (send bt get-top-level-window)
-                                                 #:message (format "Choose a shortcut for: ~a"
-                                                                   callback-name)))
-          (when ev
-            (define keymap (send bt get-callback-keymap))
-            (send keymap remove-function-mappings callback-name) ; remove all old shortcuts
-            (send keymap map-function callback-name ev)
-            (save-keymap))))
-      (new mouse-event% [event-type 'left-down] [left-down #t] [control-down #true]))
-
 ;; A message% can't receive events, so we enclose the message in a panel, which can.
 (define color-panel%
   (class panel%
@@ -369,251 +343,307 @@
       (new message% [parent this] [label (make-button-color-label color)]
            [horiz-margin 0] [vert-margin 0]))))
 
-(define color-button-keymap (new keymap% [parent button-keymap]))
+(define (make-button-color-label color)
+  (pict->bitmap (colorize (filled-rectangle (*color-button-size*) (*color-button-size*)) color)))
 
-(send color-button-keymap add-function "set-pen-color"
-      (λ (msg-panel ev) (send canvas set-color (send msg-panel get-color)))
-      (new mouse-event% [event-type 'left-down] [left-down #t]))
-
-(send color-button-keymap add-function "choose-color"
-      (λ (msg-panel ev)
-        (define c (get-color-from-user #f #f (send msg-panel get-color)))
-        (when c
-          (send msg-panel set-color c)
-          (send canvas set-color c)
-          (send msg-panel refresh)))
-      (new mouse-event% [event-type 'right-down] [right-down #t]))
-
-(define color-buttons
-  ; Color values from Wikipedia
-  (for/list ([color '("black"
-                      (128 128 128) ; gray
-                      "white"
-                      (128 255 0) ; chartreuse (same as racket, off by one)
-                      "green"
-                      (0 255 128) ; spring
-                      "cyan"
-                      (0 127 255) ; azure
-                      "blue"
-                      (127 0 255) ; violet
-                      "magenta"
-                      (255 0 128) ; rose
-                      "red"
-                      (255 128 0) ; orange, but not racket's one
-                      "yellow"
-                      )] ; initial colors, may be changed
-             [i (in-naturals 1)])
-    (define callback-name (format "color ~a" i))
-    (define bt
-      (new (keymapped-mixin (keymapped-callback-mixin color-panel%)) [parent bt-panel]
-           [keymap color-button-keymap]
-           [callback-name callback-name]
-           [callback-keymap canvas-keymap]
-           [callback (λ _ (send canvas set-color (send bt get-color)))]
-           [color (if (string? color)
-                    (send the-color-database find-color color)
-                    (if (list? color)
-                      (apply make-color color)
-                      color))]))
-    bt))
-
-;===============;
-;=== Buttons ===;
-;===============;
-
-;; TODO: Each button action should give the focus back to the canvas
-
-(define bt-erase (new (keymapped-mixin (keymapped-callback-mixin button%))
-                      [parent bt-panel]
-                      [label "Clear"]
-                      [keymap button-keymap]
-                      [callback-keymap canvas-keymap]
-                      [callback-name "clear"]
-                      [callback (λ (bt ev) (send canvas clear-commands))]))
-
-(define bt-undo (new (keymapped-mixin (keymapped-callback-mixin button%))
-                     [parent bt-panel]
-                     [label "Undo"]
-                     [keymap button-keymap]
-                     [callback-keymap canvas-keymap]
-                     [callback-name "undo"]
-                     [callback (λ (bt ev) (send canvas undo-command))]))
-
-(define bt-freehand
-  (new (keymapped-mixin (keymapped-callback-mixin button%))
-       [parent bt-panel]
-       [label (pict->bitmap
-               (dc (λ (dc dx dy)
-                     (define old-pen (send dc get-pen))
-                     (define-values (old-scale-x old-scale-y) (send dc get-scale))
-                     (send dc set-pen "black" 1 'solid)
-                     (send dc set-scale 0.3 0.3)
-                     (send dc draw-lines
-                           '((37 . 4)
-                             (37 . 4) (38 . 2) (38 . 2) (40 . 1) (43 . 0) (45 . 0) (47 . 2)
-                             (49 . 4) (51 . 7) (51 . 9) (51 . 14) (50 . 17) (48 . 22) (46 . 25)
-                             (45 . 26) (42 . 27) (39 . 27) (36 . 26) (32 . 21) (28 . 16) (24 . 10)
-                             (17 . 4) (11 . 2) (8 . 2) (3 . 5) (0 . 10) (0 . 13) (0 . 15) (0 . 15)))
-                     (send dc set-scale old-scale-x old-scale-y)
-                     (send dc set-pen old-pen))
-                   20 10))]
-       [keymap button-keymap]
-       [callback-keymap canvas-keymap]
-       [callback-name "freehand"]
-       [callback (λ (bt ev) (send canvas set-tool 'freehand))]))
-
-(define bt-line
-  (new (keymapped-mixin (keymapped-callback-mixin button%))
-       [parent bt-panel]
-       [label (pict->bitmap
-               (dc (λ (dc dx dy)
-                     (define old-pen (send dc get-pen))
-                     (send dc set-pen "black" 1 'solid)
-                     (send dc draw-line 0 10 20 0)
-                     (send dc set-pen old-pen))
-                   20 10))]
-       [keymap button-keymap]
-       [callback-keymap canvas-keymap]
-       [callback-name "line"]
-       [callback (λ (bt ev) (send canvas set-tool 'line #:filled? #false))]))
-
-(define bt-filled-rectangle
-  (new (keymapped-mixin (keymapped-callback-mixin button%))
-       [parent bt-panel]
-       [label (pict->bitmap (filled-rectangle 20 10 #:color "black"))]
-       [keymap button-keymap]
-       [callback-keymap canvas-keymap]
-       [callback-name "filled-rectangle"]
-       [callback (λ (bt ev) (send canvas set-tool 'rectangle #:filled? #true))]))
-
-(define bt-rectangle
-  (new (keymapped-mixin (keymapped-callback-mixin button%))
-       [parent bt-panel]
-       [label (pict->bitmap (rectangle 20 10 #:border-color "black" #:border-width 1))]
-       [keymap button-keymap]
-       [callback-keymap canvas-keymap]
-       [callback-name "rectangle"]
-       [callback (λ (bt ev) (send canvas set-tool 'rectangle #:filled? #false))]))
-
-(define bt-filled-ellipse
-  (new (keymapped-mixin (keymapped-callback-mixin button%))
-       [parent bt-panel]
-       [label (pict->bitmap (filled-ellipse 20 10 #:color "black"))]
-       [keymap button-keymap]
-       [callback-keymap canvas-keymap]
-       [callback-name "filled-ellipse"]
-       [callback (λ (bt ev) (send canvas set-tool 'ellipse #:filled? #true))]))
-
-(define bt-ellipse
-  (new (keymapped-mixin (keymapped-callback-mixin button%))
-       [parent bt-panel]
-       [label (pict->bitmap (ellipse 20 10 #:border-color "black" #:border-width 1))]
-       [keymap button-keymap]
-       [callback-keymap canvas-keymap]
-       [callback-name "ellipse"]
-       [callback (λ (bt ev) (send canvas set-tool 'ellipse #:filled? #false))]))
-
-(void (new grow-box-spacer-pane% [parent bt-panel]))
-
-
-(define width-slider (new slider% [parent fr] [label "Line width"]
-                          [min-value line-width-min]
-                          [max-value line-width-max]
-                          [init-value line-width-init]
-                          [callback (λ (sl ev)
-                                      (send canvas set-line-width (send sl get-value)))]))
-
-;==============;
-;=== Canvas ===;
-;==============;
-
-(define canvas (new (keymapped-mixin my-canvas%) [parent fr]
-                [keymap canvas-keymap]
-                [on-set-line-width
-                 (λ (cv width)
-                   (send width-slider set-value width)
-                   (send width-slider refresh))]
-                [paint-callback
-                 (λ (cv dc)
-                   (send cv draw dc)
-                   (send width-slider set-value (send cv get-line-width))
-                   (send width-slider refresh))]))
-
-;=============;
-;=== Menus ===;
-;=============;
-
-(define menu-bar (new menu-bar% [parent fr]))
-(define file-menu (new menu% [parent menu-bar] [label "&File"]))
-
-(send canvas-keymap add-function "open"
-      (λ (receiver ev)
-        (define f
-          (get-file "Open a file" fr #f #f "rktp" '()
-                    '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
-        (when f (send canvas open-file f)))
-      (new key-event% [key-code #\o] [control-down #true]))
-
-(send canvas-keymap add-function "save"
-      (λ (receiver ev)
-        (define f
-          (put-file "Save file" fr #f #f "rktp" '()
-                    '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
-        (when f (send canvas save-file f)))
-      (new key-event% [key-code #\s] [control-down #true]))
-
-(define file:open-menu-item
-  (new menu-item% [parent file-menu] [label "Open"]
-       [callback (send canvas-keymap get-function "open")]))
-
-(define file:save-menu-item
-  (new menu-item% [parent file-menu] [label "Save"]
-       [callback (send canvas-keymap get-function "save")]))
-
-(define keymap-menu (new menu% [parent menu-bar] [label "Keymaps"]))
-
-(define keymap:delete-keymap-file-menu-item
-  (new menu-item% [parent keymap-menu] [label "Delete keymap file"]
-       [callback (λ _ (when (file-exists? keymap-file) (delete-file keymap-file)))]))
-
-(void (new separator-menu-item% [parent keymap-menu]))
-
+;; warning: almost generic, but currently depends on `save-keymap` which is ad-hoc.
 (define (make-keymap-menu kmp label #:parent parent-menu)
-  (define submenu (new menu% [parent parent-menu] [label label]))
-  (list
-   submenu
-   (new menu-item% [parent submenu] [label "Shortcuts"]
-        [callback
-         (λ (bt ev) (keymap-shortcuts/frame kmp #:parent fr))])
+    (define submenu (new menu% [parent parent-menu] [label label]))
+    (list
+     submenu
+     (new menu-item% [parent submenu] [label "Shortcuts"]
+          [callback
+           (λ (bt ev) (keymap-shortcuts/frame kmp #:parent frame))])
   
-   (new menu-item% [parent submenu] [label "New shortcut"]
-        [callback
-         (λ _
-           (keymap-map-function/frame kmp
-                                      #:parent fr
-                                      #:callback
-                                      (λ (keymap name ev)
-                                        (when ev (save-keymap)))))])
-  
-   (new menu-item% [parent submenu] [label "Remove shortcut"]
-        [callback
-         (λ _
-           (keymap-remove-mapping/frame kmp
-                                        #:parent fr
+     (new menu-item% [parent submenu] [label "New shortcut"]
+          [callback
+           (λ _
+             (keymap-map-function/frame kmp
+                                        #:parent frame
                                         #:callback
                                         (λ (keymap name ev)
-                                          (when ev (save-keymap)))))])))
+                                          (when ev (save-keymap)))))])
+  
+     (new menu-item% [parent submenu] [label "Remove shortcut"]
+          [callback
+           (λ _
+             (keymap-remove-mapping/frame kmp
+                                          #:parent frame
+                                          #:callback
+                                          (λ (keymap name ev)
+                                            (when ev (save-keymap)))))])))
 
-;; TODO: It may be less confusing to the user to 'merge' the view of all the keymaps
-(void (make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu))
-(void (make-keymap-menu button-keymap "Buttons" #:parent keymap-menu))
-(void (make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu))
+;===========================;
+;=== Build the GUI frame ===;
+;===========================;
 
-(load-keymap) ; in case one already exists, replaces all previous keybindings
+;; This function is meant to be called only once.
+(define (create-frame)
+  (define widget-dict (make-hasheq))
+  (define-syntax-rule (define-widget name expr)
+    (begin
+      (define name expr)
+      (hash-set! widget-dict 'name name)))
+  
+  (define-widget frame (new frame% #;(keymapped%% frame%)
+                  #;[keymap keymap]
+                  [label "Racket Paint"]
+                  [width 500] [height 500]))
+
+  (define-widget bt-panel (new horizontal-panel% [parent frame] [stretchable-height #f]))
+
+  ;=====================;
+  ;=== Color buttons ===;
+  ;=====================;
+
+  ;; Change the keymap mappings for the callback of a selected widget,
+  ;; if it is a keymapped-callback-widget<%>.
+  (send button-keymap add-function
+        "change-color-button-callback-mapping"
+        (λ (bt bt-ev)
+          (when (is-a? bt keymapped-callback<%>)
+            (define callback-name (send bt get-callback-name))
+            (define ev (show-event-listener-dialog #:parent (send bt get-top-level-window)
+                                                   #:message (format "Choose a shortcut for: ~a"
+                                                                     callback-name)))
+            (when ev
+              (define keymap (send bt get-callback-keymap))
+              (send keymap remove-function-mappings callback-name) ; remove all old shortcuts
+              (send keymap map-function callback-name ev)
+              (save-keymap))))
+        (new mouse-event% [event-type 'left-down] [left-down #t] [control-down #true]))
+
+  (send color-button-keymap add-function "set-pen-color"
+        (λ (msg-panel ev) (send canvas set-color (send msg-panel get-color)))
+        (new mouse-event% [event-type 'left-down] [left-down #t]))
+
+  (send color-button-keymap add-function "choose-color"
+        (λ (msg-panel ev)
+          (define c (get-color-from-user #f #f (send msg-panel get-color)))
+          (when c
+            (send msg-panel set-color c)
+            (send canvas set-color c)
+            (send msg-panel refresh)))
+        (new mouse-event% [event-type 'right-down] [right-down #t]))
+
+  (define-widget color-buttons
+    ; Color values from Wikipedia
+    (for/list ([color '("black"
+                        (128 128 128) ; gray
+                        "white"
+                        (128 255 0) ; chartreuse (same as racket, off by one)
+                        "green"
+                        (0 255 128) ; spring
+                        "cyan"
+                        (0 127 255) ; azure
+                        "blue"
+                        (127 0 255) ; violet
+                        "magenta"
+                        (255 0 128) ; rose
+                        "red"
+                        (255 128 0) ; orange, but not racket's one
+                        "yellow"
+                        )] ; initial colors, may be changed
+               [i (in-naturals 1)])
+      (define callback-name (format "color ~a" i))
+      (define bt
+        (new (keymapped-mixin (keymapped-callback-mixin color-panel%)) [parent bt-panel]
+             [keymap color-button-keymap]
+             [callback-name callback-name]
+             [callback-keymap canvas-keymap]
+             [callback (λ _ (send canvas set-color (send bt get-color)))]
+             [color (if (string? color)
+                      (send the-color-database find-color color)
+                      (if (list? color)
+                        (apply make-color color)
+                        color))]))
+      bt))
+
+  ;===============;
+  ;=== Buttons ===;
+  ;===============;
+
+  ;; TODO: Each button action should give the focus back to the canvas
+
+  (define-widget bt-erase
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label "Clear"]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "clear"]
+         [callback (λ (bt ev) (send canvas clear-commands))]))
+
+  (define-widget bt-undo
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label "Undo"]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "undo"]
+         [callback (λ (bt ev) (send canvas undo-command))]))
+
+  (define-widget bt-freehand
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label (pict->bitmap
+                 (dc (λ (dc dx dy)
+                       (define old-pen (send dc get-pen))
+                       (define-values (old-scale-x old-scale-y) (send dc get-scale))
+                       (send dc set-pen "black" 1 'solid)
+                       (send dc set-scale 0.3 0.3)
+                       (send dc draw-lines
+                             '((37 . 4)
+                               (37 . 4) (38 . 2) (38 . 2) (40 . 1) (43 . 0) (45 . 0) (47 . 2)
+                               (49 . 4) (51 . 7) (51 . 9) (51 . 14) (50 . 17) (48 . 22) (46 . 25)
+                               (45 . 26) (42 . 27) (39 . 27) (36 . 26) (32 . 21) (28 . 16) (24 . 10)
+                               (17 . 4) (11 . 2) (8 . 2) (3 . 5) (0 . 10) (0 . 13) (0 . 15) (0 . 15)))
+                       (send dc set-scale old-scale-x old-scale-y)
+                       (send dc set-pen old-pen))
+                     20 10))]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "freehand"]
+         [callback (λ (bt ev) (send canvas set-tool 'freehand))]))
+
+  (define-widget bt-line
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label (pict->bitmap
+                 (dc (λ (dc dx dy)
+                       (define old-pen (send dc get-pen))
+                       (send dc set-pen "black" 1 'solid)
+                       (send dc draw-line 0 10 20 0)
+                       (send dc set-pen old-pen))
+                     20 10))]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "line"]
+         [callback (λ (bt ev) (send canvas set-tool 'line #:filled? #false))]))
+
+  (define-widget bt-filled-rectangle
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label (pict->bitmap (filled-rectangle 20 10 #:color "black"))]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "filled-rectangle"]
+         [callback (λ (bt ev) (send canvas set-tool 'rectangle #:filled? #true))]))
+
+  (define-widget bt-rectangle
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label (pict->bitmap (rectangle 20 10 #:border-color "black" #:border-width 1))]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "rectangle"]
+         [callback (λ (bt ev) (send canvas set-tool 'rectangle #:filled? #false))]))
+
+  (define-widget bt-filled-ellipse
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label (pict->bitmap (filled-ellipse 20 10 #:color "black"))]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "filled-ellipse"]
+         [callback (λ (bt ev) (send canvas set-tool 'ellipse #:filled? #true))]))
+
+  (define-widget bt-ellipse
+    (new (keymapped-mixin (keymapped-callback-mixin button%))
+         [parent bt-panel]
+         [label (pict->bitmap (ellipse 20 10 #:border-color "black" #:border-width 1))]
+         [keymap button-keymap]
+         [callback-keymap canvas-keymap]
+         [callback-name "ellipse"]
+         [callback (λ (bt ev) (send canvas set-tool 'ellipse #:filled? #false))]))
+
+  (void (new grow-box-spacer-pane% [parent bt-panel]))
+
+
+  (define-widget width-slider
+    (new slider% [parent frame] [label "Line width"]
+         [min-value line-width-min]
+         [max-value line-width-max]
+         [init-value line-width-init]
+         [callback (λ (sl ev)
+                     (send canvas set-line-width (send sl get-value)))]))
+
+  ;==============;
+  ;=== Canvas ===;
+  ;==============;
+
+  (define-widget canvas
+    (new (keymapped-mixin my-canvas%) [parent frame]
+         [keymap canvas-keymap]
+         [on-set-line-width
+          (λ (cv width)
+            (send width-slider set-value width)
+            (send width-slider refresh))]
+         [paint-callback
+          (λ (cv dc)
+            (send cv draw dc)
+            (send width-slider set-value (send cv get-line-width))
+            (send width-slider refresh))]))
+
+  ;=============;
+  ;=== Menus ===;
+  ;=============;
+
+  (define-widget menu-bar (new menu-bar% [parent frame]))
+  (define-widget file-menu (new menu% [parent menu-bar] [label "&File"]))
+
+  (send canvas-keymap add-function "open"
+        (λ (receiver ev)
+          (define f
+            (get-file "Open a file" frame #f #f "rktp" '()
+                      '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
+          (when f (send canvas open-file f)))
+        (new key-event% [key-code #\o] [control-down #true]))
+
+  (send canvas-keymap add-function "save"
+        (λ (receiver ev)
+          (define f
+            (put-file "Save file" frame #f #f "rktp" '()
+                      '(("Racket Paint" "*.rktp") ("Any" "*.*"))))
+          (when f (send canvas save-file f)))
+        (new key-event% [key-code #\s] [control-down #true]))
+
+  (define file:open-menu-item
+    (new menu-item% [parent file-menu] [label "Open"]
+         [callback (send canvas-keymap get-function "open")]))
+
+  (define-widget file:save-menu-item
+    (new menu-item% [parent file-menu] [label "Save"]
+         [callback (send canvas-keymap get-function "save")]))
+
+  (define-widget keymap-menu (new menu% [parent menu-bar] [label "Keymaps"]))
+
+  (define-widget keymap:event-listener (new menu-item% [parent keymap-menu] [label "Event listener"]
+                                            [callback (λ _ (show-event-listener-dialog))]))
+
+  (define-widget keymap:delete-keymap-file-menu-item
+    (new menu-item% [parent keymap-menu] [label "Delete keymap file"]
+         [callback (λ _ (when (file-exists? keymap-file) (delete-file keymap-file)))]))
+
+  (void (new separator-menu-item% [parent keymap-menu]))
+
+  ;; TODO: It may be less confusing to the user to 'merge' the view of all the keymaps
+  (void (make-keymap-menu canvas-keymap "Canvas" #:parent keymap-menu))
+  (void (make-keymap-menu button-keymap "Buttons" #:parent keymap-menu))
+  (void (make-keymap-menu color-button-keymap "Color buttons" #:parent keymap-menu))
+
+  widget-dict)
 
 (module+ drracket
+  (define widget-dict (create-frame))
+
+  (load-keymap) ; in case one already exists, replaces all previous keybindings
+
+  (define canvas (dict-ref widget-dict 'canvas))
+  ; Useful for debugging
   (send canvas-keymap add-function "print-commands"
         (λ _ (writeln (send canvas get-commands)))
         (new key-event% [key-code 'f12]))
-  
-  (send fr show #t))
+
+  (define frame (dict-ref widget-dict 'frame))
+  (send frame show #t))
