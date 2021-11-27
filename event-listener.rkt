@@ -52,7 +52,8 @@
 
 (define (show-event-listener-dialog #:parent [parent #f]
                                     #:message [message #f]
-                                    #:full-event? [full-event? #false])
+                                    #:full-event? [full-event? #false]
+                                    #:clipboard-button? [clipboard-button? #false])
 
   (define last-ev #f)
   
@@ -94,6 +95,12 @@
                          [callback (λ (bt ev)
                                      (set! last-ev #false)
                                      (send fr show #f))]))
+  (define bt-clip
+    (and clipboard-button?
+         (new button% [parent ok-cancel-panel] [label "Copy"]
+              [callback (λ _ (send the-clipboard set-clipboard-string
+                                   (send (send cv get-editor) get-text)
+                                   0))])))
 
   (send cv focus)
   (send fr show #t)
@@ -154,7 +161,7 @@
   slbf)
 
 (module+ drracket
-  (show-event-listener-dialog #:full-event? #true))
+  (show-event-listener-dialog #:full-event? #true #:clipboard-button? #true))
 (module+ main
-  (show-event-listener-dialog #:full-event? #true))
+  (show-event-listener-dialog #:full-event? #true #:clipboard-button? #true))
 
