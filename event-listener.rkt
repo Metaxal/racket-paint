@@ -98,9 +98,12 @@
   (define bt-clip
     (and clipboard-button?
          (new button% [parent ok-cancel-panel] [label "Copy"]
-              [callback (λ _ (send the-clipboard set-clipboard-string
-                                   (send (send cv get-editor) get-text)
-                                   0))])))
+              [callback (λ _
+                          (send the-clipboard set-clipboard-string
+                                (send (send cv get-editor) get-text)
+                                0)
+                          ; Give the focus back to the canvas.
+                          (send cv focus))])))
 
   (send cv focus)
   (send fr show #t)
