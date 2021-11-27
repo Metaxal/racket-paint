@@ -155,4 +155,6 @@
 
 (module+ drracket
   (show-event-listener-dialog #:full-event? #true))
+(module+ main
+  (show-event-listener-dialog #:full-event? #true))
 
