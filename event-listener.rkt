@@ -6,9 +6,18 @@
 
 (provide (all-defined-out))
 
+(define (get-mouse-state)
+  (define-values (pt mods) (get-current-mouse-state))
+  (list* (send pt get-x) (send pt get-y) mods))
+
+(define (system-info)
+  (for/list ([x '(os os* arch word vm gc link machine target-machine
+                     so-suffix so-mode fs-change cross)])
+    (cons x (system-type x))))
+
 (define meditor-canvas%
   (class editor-canvas%
-    (init-field [full-event? #false] [erase? #true])
+    (init-field [full-event? #false] [erase? #true] [mouse-state? #false])
     (define filtered '(motion enter leave shift rshift control rcontrol release))
 
     (define/public (filter-type/key ev-type yes?)
@@ -44,7 +53,9 @@
            (pretty-format (if full-event? ev-dict simple-ev-dict)
                           80
                           #:mode 'write)
-           "\n"))
+           (if mouse-state?
+             (string-append "\n" (pretty-format (get-mouse-state) 80 #:mode 'write) "\n")
+             "\n")))
         (define text (send this get-editor))
         (if erase? (send text erase) (send text insert "\n"))
         (send text insert str)))
@@ -55,7 +66,9 @@
                                     #:message [message #f]
                                     #:full-event? [full-event? #false]
                                     #:clipboard-button? [clipboard-button? #false]
-                                    #:erase? [erase? #true])
+                                    #:erase? [erase? #true]
+                                    #:mouse-state? [mouse-state? #false]
+                                    #:system-info? [system-info? #false])
 
   (define last-ev #f)
   
@@ -65,7 +78,8 @@
     (void (new message% [parent fr] [label message])))
 
   (define cv (new meditor-canvas% [parent fr] [editor (new text%)]
-                  [erase? erase?]))
+                  [erase? erase?]
+                  [mouse-state? mouse-state?]))
   (set-field! full-event? cv full-event?)
 
   (define cbx-panel (new horizontal-panel% [parent fr]
@@ -79,11 +93,21 @@
                      (send cv filter-type/key type (send cb get-value))
                      (send cv focus))]))
 
-  (void (new check-box% [parent fr]
+  (define bt2-panel (new horizontal-panel% [parent fr]
+                         [alignment '(center center)]
+                         [stretchable-height #f]))
+
+  (void (new check-box% [parent bt2-panel]
              [label "full event"]
              [value (get-field full-event? cv)]
              [callback (λ (cb ev)
                          (set-field! full-event? cv (send cb get-value))
+                         (send cv focus))]))
+  (void (new check-box% [parent bt2-panel]
+             [label "mouse state"]
+             [value (get-field mouse-state? cv)]
+             [callback (λ (cb ev)
+                         (set-field! mouse-state? cv (send cb get-value))
                          (send cv focus))]))
   
   (define ok-cancel-panel (new horizontal-panel% [parent fr]
@@ -107,6 +131,10 @@
                                 0)
                           ; Give the focus back to the canvas.
                           (send cv focus))])))
+
+  (when system-info?
+    (send (send cv get-editor) insert
+          (string-append (pretty-format (system-info) 80) "\n")))
 
   (send cv focus)
   (send fr show #t)
@@ -173,8 +201,13 @@
   (define-global:boolean *clip-button?* #true "Show the clipboard button")
   (define-global:boolean *full-event?* #true "Full event by default")
   (define-global:boolean *erase?* #true "Erase the canvas after each event")
+  (define-global:boolean *mouse-state?* #false
+    "Also include the mouse state as reported by (get-current-mouse-state)")
+  (define-global:boolean *system-info?* #false "Include system information")
   (void (globals->command-line))
   (show-event-listener-dialog #:full-event? (*full-event?*)
                               #:clipboard-button? (*clip-button?*)
-                              #:erase? (*erase?*)))
+                              #:erase? (*erase?*)
+                              #:mouse-state? (*mouse-state?*)
+                              #:system-info? (*system-info?*)))
 
