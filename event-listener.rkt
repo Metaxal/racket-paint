@@ -8,7 +8,7 @@
 
 (define meditor-canvas%
   (class editor-canvas%
-    (init-field [full-event? #false])
+    (init-field [full-event? #false] [erase? #true])
     (define filtered '(motion enter leave shift rshift control rcontrol release))
 
     (define/public (filter-type/key ev-type yes?)
@@ -43,9 +43,10 @@
            "\n\n"
            (pretty-format (if full-event? ev-dict simple-ev-dict)
                           80
-                          #:mode 'write)))
+                          #:mode 'write)
+           "\n"))
         (define text (send this get-editor))
-        (send text erase)
+        (if erase? (send text erase) (send text insert "\n"))
         (send text insert str)))
     
     (super-new)))
@@ -53,7 +54,8 @@
 (define (show-event-listener-dialog #:parent [parent #f]
                                     #:message [message #f]
                                     #:full-event? [full-event? #false]
-                                    #:clipboard-button? [clipboard-button? #false])
+                                    #:clipboard-button? [clipboard-button? #false]
+                                    #:erase? [erase? #true])
 
   (define last-ev #f)
   
@@ -62,7 +64,8 @@
   (when message
     (void (new message% [parent fr] [label message])))
 
-  (define cv (new meditor-canvas% [parent fr] [editor (new text%)]))
+  (define cv (new meditor-canvas% [parent fr] [editor (new text%)]
+                  [erase? erase?]))
   (set-field! full-event? cv full-event?)
 
   (define cbx-panel (new horizontal-panel% [parent fr]
@@ -166,5 +169,12 @@
 (module+ drracket
   (show-event-listener-dialog #:full-event? #true #:clipboard-button? #true))
 (module+ main
-  (show-event-listener-dialog #:full-event? #true #:clipboard-button? #true))
+  (require global)
+  (define-global:boolean *clip-button?* #true "Show the clipboard button")
+  (define-global:boolean *full-event?* #true "Full event by default")
+  (define-global:boolean *erase?* #true "Erase the canvas after each event")
+  (void (globals->command-line))
+  (show-event-listener-dialog #:full-event? (*full-event?*)
+                              #:clipboard-button? (*clip-button?*)
+                              #:erase? (*erase?*)))
 
