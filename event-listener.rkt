@@ -134,7 +134,13 @@
 
   (when system-info?
     (send (send cv get-editor) insert
-          (string-append (pretty-format (system-info) 80) "\n")))
+          (string-append
+           (pretty-format
+            (list* (cons 'version (version))
+                   (cons 'system-language+country (system-language+country))
+                   (system-info))
+            80)
+           "\n")))
 
   (send cv focus)
   (send fr show #t)
