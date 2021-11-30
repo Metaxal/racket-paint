@@ -48,7 +48,7 @@
         
         (define str
           (string-append
-           (simplified-event-dict->string simple-ev-dict)
+           (~s (simplified-event-dict->string simple-ev-dict))
            "\n\n"
            (pretty-format (if full-event? ev-dict simple-ev-dict)
                           80
