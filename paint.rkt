@@ -577,7 +577,9 @@
 
 
   (define-widget width-slider
-    (new slider% [parent frame] [label "Line width"]
+    (new (keymapped-mixin slider%) [parent frame]
+         [label "Line width"]
+         [keymap canvas-keymap] ; we really only need the slider keymap, but I'm lazy
          [min-value line-width-min]
          [max-value line-width-max]
          [init-value line-width-init]
