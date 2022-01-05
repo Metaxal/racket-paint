@@ -23,6 +23,11 @@
   exact-positive-integer?
   string->number)
 
+(define-global *button-size* #false
+  "Size of the color buttons"
+  (or/c #false exact-positive-integer?)
+  string->number)
+
 (define line-width-init 1)
 (define line-width-min 1)
 (define line-width-max 100)
@@ -377,8 +382,10 @@
 ;=== Build the GUI frame ===;
 ;===========================;
 
+(define-global:boolean *fullscreen?* #false "fullscreen mode")
+
 ;; This function is meant to be called only once.
-(define (create-frame)
+(define (create-frame [fullscreen? (*fullscreen?*)])
   (define widget-dict (make-hasheq))
   (define-syntax-rule (define-widget name expr)
     (begin
@@ -387,6 +394,7 @@
   
   (define-widget frame (new frame% #;(keymapped%% frame%)
                   #;[keymap keymap]
+                  [style (if fullscreen? '(hide-menu-bar) '())]
                   [label "Racket Paint"]
                   [width 500] [height 500]))
 
@@ -469,6 +477,7 @@
     (new (keymapped-mixin (keymapped-callback-mixin button%))
          [parent bt-panel]
          [label "Clear"]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "clear"]
@@ -478,6 +487,7 @@
     (new (keymapped-mixin (keymapped-callback-mixin button%))
          [parent bt-panel]
          [label "Undo"]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "undo"]
@@ -501,6 +511,7 @@
                        (send dc set-scale old-scale-x old-scale-y)
                        (send dc set-pen old-pen))
                      20 10))]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "freehand"]
@@ -516,6 +527,7 @@
                        (send dc draw-line 0 10 20 0)
                        (send dc set-pen old-pen))
                      20 10))]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "line"]
@@ -525,6 +537,7 @@
     (new (keymapped-mixin (keymapped-callback-mixin button%))
          [parent bt-panel]
          [label (pict->bitmap (filled-rectangle 20 10 #:color "black"))]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "filled-rectangle"]
@@ -534,6 +547,7 @@
     (new (keymapped-mixin (keymapped-callback-mixin button%))
          [parent bt-panel]
          [label (pict->bitmap (rectangle 20 10 #:border-color "black" #:border-width 1))]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "rectangle"]
@@ -543,6 +557,7 @@
     (new (keymapped-mixin (keymapped-callback-mixin button%))
          [parent bt-panel]
          [label (pict->bitmap (filled-ellipse 20 10 #:color "black"))]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "filled-ellipse"]
@@ -552,6 +567,7 @@
     (new (keymapped-mixin (keymapped-callback-mixin button%))
          [parent bt-panel]
          [label (pict->bitmap (ellipse 20 10 #:border-color "black" #:border-width 1))]
+         [min-width (*button-size*)] [min-height (*button-size*)]
          [keymap button-keymap]
          [callback-keymap canvas-keymap]
          [callback-name "ellipse"]
